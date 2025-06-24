@@ -1,0 +1,25 @@
+Example error when the kernel does not give results:
+
+[AIE ERROR] _XAie_LoadProgMemSection():231: Overflow of program memory
+XAie_LoadElf failed with XAIE_INVALID_ELFTraceback (most recent call last):
+  File "/scratch/luisr/mlir-aie/install/bin/aiecc.py", line 12, in <module>
+    main()
+  File "/scratch/luisr/mlir-aie/install/python/aie/compiler/aiecc/main.py", line 1416, in main
+    run(module_str)
+  File "/scratch/luisr/mlir-aie/install/python/aie/compiler/aiecc/main.py", line 1390, in run
+    asyncio.run(runner.run_flow())
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/scratch/luisr/mlir-aie/install/python/aie/compiler/aiecc/main.py", line 1290, in run_flow
+    await self.process_cdo(input_physical_str)
+  File "/scratch/luisr/mlir-aie/install/python/aie/compiler/aiecc/main.py", line 599, in process_cdo
+    aiedialect.generate_cdo(input_physical.operation, self.tmpdirname)
+ValueError: Failed to generate cdo because:
+make: *** [/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/../makefile-common:165: build/final_256x1280x256_32x32x32_8c.xclbin] Error 1

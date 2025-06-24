@@ -1,0 +1,179 @@
+XILINX_LOC=/proj/xbuilds/2024.2_INT_daily_latest/installs/lin64/Vitis/2024.2
+SHELL=/bin/csh
+MYXILINX_VER=2024.2
+HISTCONTROL=ignoreboth:erasedups
+GROUP=newhiredefaultgrp
+MACHTYPE=x86_64
+AIETOOLS_ROOT=/proj/xbuilds/2024.2_INT_daily_latest/installs/lin64/Vitis/2024.2/aietools
+XILINX_XRT=/opt/xilinx/xrt
+n_aie_cols=4
+PWD=/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array
+LOGNAME=lromeror
+NPU2=1
+XDG_SESSION_TYPE=tty
+MLIR_AIE_INSTALL_DIR=/scratch/luisr/mlir-aie/install
+N=256
+M=256
+K=256
+n=64
+m=64
+k=64
+HOME=/home/lromeror
+LANG=en_US.UTF-8
+PEANO_INSTALL_DIR=/scratch/luisr/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie
+VIRTUAL_ENV=/scratch/luisr/mlir-aie/ironenv
+OSTYPE=linux
+SSH_CONNECTION=172.21.39.59 58906 172.20.10.58 22
+XDG_SESSION_CLASS=user
+PYTHONPATH=/scratch/luisr/mlir-aie/install/python:/opt/xilinx/xrt/python
+TERM=xterm-256color
+HOST=xcoradaie213
+USER=lromeror
+use_chess=641
+emulate_bfloat16_mmul_with_bfp16=640
+SHLVL=3
+XDG_SESSION_ID=1130
+VIRTUAL_ENV_PROMPT=(ironenv) 
+LM_LICENSE_FILE=2100@aiengine
+LD_LIBRARY_PATH=/scratch/luisr/mlir-aie/install/lib:/opt/xilinx/xrt/lib
+XDG_RUNTIME_DIR=/run/user/50093633
+MYXILINX_BASE=/proj/xbuilds/2024.2_INT_daily_latest
+dtype_out=bf16
+SSH_CLIENT=172.21.39.59 58906 22
+NLSPATH=/usr/share/locale/%L/LC_MESSAGES/%N.cat:/usr/share/locale/%l/LC_MESSAGES/%N.cat
+VENDOR=unknown
+PATH=/scratch/luisr/mlir-aie/install/bin:/scratch/luisr/mlir-aie/ironenv/bin:/opt/xilinx/xrt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/proj/xbuilds/2024.2_INT_daily_latest/installs/lin64/Vitis/2024.2/aietools/bin:/proj/xbuilds/2024.2_INT_daily_latest/installs/lin64/Vitis/2024.2/bin
+dtype_in=bf16
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/50093633/bus
+SSH_TTY=/dev/pts/2
+HOSTTYPE=x86_64-linux
+REMOTEHOST=172.21.39.59
+OLDPWD=/scratch/luisr/mlir-aie
+runargs=--iters 20 --warmup 10
+_=/usr/bin/env
+##===- Makefile -----------------------------------------------------------===##
+# 
+# This file licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Copyright (C) 2025, Advanced Micro Devices, Inc.
+# 
+##===----------------------------------------------------------------------===##
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+subdir=whole_array
+targetname=whole_array
+
+
+# M, K, N: final GEMM dimensions
+M?=512
+K?=512
+N?=512
+
+# m, k, n: single AIE core GEMM dimensions
+m?=32
+k?=32
+n?=32
+
+n_aie_cols?=4
+b_col_maj?=0
+
+kernels=mm_${m}x${k}x${n}
+aieargs+=-m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
+runargs+=--b_col_maj ${b_col_maj}
+target_suffix=${M}x${K}x${N}_${m}x${k}x${n}_${n_aie_cols}c
+use_placed?=0
+use_iron?=0
+
+# set this flag to 1 for linear buffer allocation
+# else, 0 for bank-aware
+use_linear_buf_alloc?=1
+
+ifeq (${use_linear_buf_alloc}, 1)
+buffer_aloc_flag=basic-sequential
+else
+buffer_aloc_flag=bank-aware
+endif
+
+ifeq (${use_placed}, 1)
+aie_py_src=${targetname}_placed.py
+ifeq (${use_iron}, 1)
+$(error Cannot specify both placed design and IRON)
+endif
+endif
+
+ifeq (${use_iron}, 1)
+aie_py_src=${targetname}_iron.py
+endif
+
+KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n}
+ifeq (${b_col_maj}, 1)
+	KERNEL_DEFINES+=-DB_COL_MAJ
+endif
+
+include ${srcdir}/../makefile-common
+
+build/mm_${m}x${k}x${n}.o: ${kernels_dir}/mm.cc
+	mkdir -p ${@D}
+	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o ${@F}
+rm -rf tmpTrace parse*.json trace*json trace.txt
+rm -rf build _build whole_array.exe
+rm -rf _build
+mkdir -p _build
+cd _build &&  cmake -E env CXXFLAGS="-std=c++23 -ggdb -DDTYPE_IN=std::bfloat16_t -DDTYPE_OUT=std::bfloat16_t -DDTYPE_ACC=float" \
+	cmake `echo /scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/..` -D CMAKE_C_COMPILER=gcc-13 -D CMAKE_CXX_COMPILER=g++-13 -DTARGET_NAME=whole_array -Dsubdir=whole_array
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/gcc-13 - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++-13 - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build
+cd _build &&  cmake --build . --config Release
+gmake[1]: Entering directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+gmake[2]: Entering directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+gmake[3]: Entering directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+gmake[3]: Leaving directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+gmake[3]: Entering directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+[ 33%] Building CXX object CMakeFiles/whole_array.dir/scratch/luisr/mlir-aie/runtime_lib/test_lib/test_utils.cpp.o
+[ 66%] Building CXX object CMakeFiles/whole_array.dir/whole_array/test.cpp.o
+[100%] Linking CXX executable whole_array
+gmake[3]: Leaving directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+[100%] Built target whole_array
+gmake[2]: Leaving directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+gmake[1]: Leaving directory '/scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/_build'
+cp _build/whole_array whole_array.exe 
+mkdir -p build
+python3 /scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/whole_array.py -m 64 -k 64 -n 64 --n-aie-cols 4 --b-col-maj 0 --dev npu2 -M 256 -K 256 -N 256 --dtype_in bf16 --dtype_out bf16 --trace_size 0 > build/aie_256x256x256_64x64x64_4c.mlir
+mkdir -p build
+cd build && /scratch/luisr/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie/bin/clang++ -O2 -std=c++20 --target=aie2p-none-unknown-elf -Wno-parentheses -Wno-attributes -Wno-macro-redefined -Wno-empty-body -DNDEBUG -I /scratch/luisr/mlir-aie/install/include  -Dbf16_bf16_ONLY -DDIM_M=64 -DDIM_K=64 -DDIM_N=64 -c /scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/../../../../aie_kernels/aie2p/mm.cc -o mm_64x64x64.o
+mkdir -p build
+cd build && aiecc.py --alloc-scheme=basic-sequential --aie-generate-xclbin --no-compile-host --xclbin-name=final_256x256x256_64x64x64_4c.xclbin \
+			--no-xchesscc --no-xbridge --peano /scratch/luisr/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie \
+			--aie-generate-npu-insts --npu-insts-name=insts_256x256x256_64x64x64_4c.txt ../build/aie_256x256x256_64x64x64_4c.mlir
+
+Generating: /scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/build/aie_256x256x256_64x64x64_4c.mlir.prj/aie_cdo_elfs.bin
+Generating: /scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/build/aie_256x256x256_64x64x64_4c.mlir.prj/aie_cdo_init.bin
+Generating: /scratch/luisr/mlir-aie/programming_examples/basic/matrix_multiplication/whole_array/build/aie_256x256x256_64x64x64_4c.mlir.prj/aie_cdo_enable.bin
+export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
+ ./whole_array.exe -x build/final_256x256x256_64x64x64_4c.xclbin -i build/insts_256x256x256_64x64x64_4c.txt -k MLIR_AIE -M 256 -K 256 -N 256 --iters 20 --warmup 10 --b_col_maj 0
+
+Avg NPU matmul time: 487.6us.
+Avg NPU gflops: 68.8155
+
+Min NPU matmul time: 133us.
+Max NPU gflops: 252.289
+
+Max NPU matmul time: 732us.
+Min NPU gflops: 45.8394
+
+PASS!
+
