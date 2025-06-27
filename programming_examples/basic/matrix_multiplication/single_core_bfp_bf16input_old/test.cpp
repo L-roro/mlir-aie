@@ -1,10 +1,10 @@
-//===- test.cpp -------------------------------------------000---*- C++ -*-===//
+//===- test.cpp -------------------------------------------------*- C++ -*-===//
 //
 // This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Copyright (C) 2023, Advanced Micro Devices, Inc.
+// Copyright (C) 2025, Advanced Micro Devices, Inc.
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,17 +14,21 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <stdfloat>
 
 #include "xrt/xrt_bo.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 
-#include "common.h"
+// Clangd fix, remove
+#ifdef _CLANGD
+namespace std {
+using bfloat16_t = double;
+} // namespace std
+#endif
+
+#include "../common.h"
 
 #ifndef DATATYPES_USING_DEFINED
 #define DATATYPES_USING_DEFINED
@@ -55,7 +59,10 @@ float abs_tol = matmul_common::get_abs_tol<C_DATATYPE>();
 float rel_tol = matmul_common::get_rel_tol<C_DATATYPE>();
 
 int main(int argc, const char *argv[]) {
-  // Program arguments parsing
+
+  // ------------------------------------------------------
+  // Parse program arguments
+  // ------------------------------------------------------
   cxxopts::Options options("Matrix Matrix Multiplication Test");
   cxxopts::ParseResult vm;
   matmul_common::add_default_options(options);
@@ -95,7 +102,9 @@ int main(int argc, const char *argv[]) {
   if (verbosity >= 1)
     std::cout << "Sequence instr count: " << instr_v.size() << "\n";
 
-  // Start the XRT test code
+  // ------------------------------------------------------
+  // Get device, load the xclbin & kernel and register them
+  // ------------------------------------------------------
   // Get a device handle
   unsigned int device_index = 0;
   auto device = xrt::device(device_index);
@@ -137,6 +146,10 @@ int main(int argc, const char *argv[]) {
     std::cout << "Getting handle to kernel:" << kernelName << "\n";
   auto kernel = xrt::kernel(context, kernelName);
 
+  // ------------------------------------------------------
+  // Initialize input/output buffer sizes and sync them
+  // ------------------------------------------------------
+
   auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int),
                           XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
   auto bo_a =
@@ -153,6 +166,9 @@ int main(int argc, const char *argv[]) {
   auto bo_trace = xrt::bo(device, tmp_trace_size * 4, XRT_BO_FLAGS_HOST_ONLY,
                           kernel.group_id(7));
 
+  // ------------------------------------------------------
+  // Generate data for buffers
+  // ------------------------------------------------------
   if (verbosity >= 1) {
     std::cout << "Writing data into buffer objects.\n";
   }
@@ -160,20 +176,31 @@ int main(int argc, const char *argv[]) {
   A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
   std::vector<A_DATATYPE> AVec(A_VOLUME);
   for (int i = 0; i < A_VOLUME; i++) {
-    AVec[i] = matmul_common::get_random<A_DATATYPE>();
+    // AVec[i] = matmul_common::get_random<A_DATATYPE>();
+    AVec[i] = i;
+    // if (i % N == i / N) {
+    //   AVec[i] = 1.0;
+    // } else {
+    //   AVec[i] = 0.0;
+    // }
   }
-  memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
+
   B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
   std::vector<B_DATATYPE> BVec(B_VOLUME);
   for (int i = 0; i < B_VOLUME; i++) {
-    BVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
-    // Diagonal:
-    // if(i % N == i / N) {
+    // BVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    BVec[i] = i;
+    // if (i % N == i / N) {
     //   BVec[i] = 1.0;
     // } else {
     //   BVec[i] = 0.0;
     // }
   }
+
+  // ------------------------------------------------------
+  // Write data into buffers
+  // ------------------------------------------------------
+  memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
   memcpy(bufB, BVec.data(), (BVec.size() * sizeof(B_DATATYPE)));
 
   // Initialize outputs; bufOut is results matrix plus tracing info
@@ -207,6 +234,9 @@ int main(int argc, const char *argv[]) {
   if (trace_size > 0)
     bo_trace.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
+  // ------------------------------------------------------
+  // Run kernel
+  // ------------------------------------------------------
   unsigned num_iter = n_iterations + n_warmup_iterations;
   float npu_time_total = 0;
   float npu_time_min = 9999999;
@@ -239,6 +269,9 @@ int main(int argc, const char *argv[]) {
       continue;
     }
 
+    // ------------------------------------------------------
+    // Check output
+    // ------------------------------------------------------
     if (do_verify) {
       memcpy(CVec.data(), bufOut, (CVec.size() * sizeof(C_DATATYPE)));
       if (verbosity >= 1) {
@@ -259,10 +292,6 @@ int main(int argc, const char *argv[]) {
       } else {
         errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
             M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
-      }
-      if (verbosity >= 2) {
-        std::cout << "C =" << std::endl;
-        matmul_common::print_matrix(CVec, K, 16, 16);
       }
       auto vstop = std::chrono::system_clock::now();
       float vtime =
@@ -291,6 +320,9 @@ int main(int argc, const char *argv[]) {
                                    vm["trace_file"].as<std::string>());
   }
 
+  // ------------------------------------------------------
+  // Output results
+  // ------------------------------------------------------
   std::cout << std::endl
             << "Avg NPU matmul time: " << npu_time_total / n_iterations << "us."
             << std::endl;
@@ -308,15 +340,15 @@ int main(int argc, const char *argv[]) {
   if (!errors) {
     std::cout << "\nPASS!\n\n";
     return 0;
-  } else {
-    std::cout << "\nError count: " << errors;
-    if (do_verify_stochastic) {
-      std::cout << " (out of " << verify_stochastic_n_samples
-                << " random samples)";
-    }
-    std::cout << "\n\n";
-
-    std::cout << "\nFailed.\n\n";
-    return 1;
   }
+
+  std::cout << "\nError count: " << errors;
+  if (do_verify_stochastic) {
+    std::cout << " (out of " << verify_stochastic_n_samples
+              << " random samples)";
+  }
+  std::cout << "\n\n";
+
+  std::cout << "\nFailed.\n\n";
+  return 1;
 }

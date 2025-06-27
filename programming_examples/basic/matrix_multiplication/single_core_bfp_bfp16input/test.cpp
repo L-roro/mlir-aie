@@ -1,10 +1,10 @@
-//===- test.cpp -------------------------------------------000---*- C++ -*-===//
+//===- test.cpp -------------------------------------------------*- C++ -*-===//
 //
 // This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Copyright (C) 2023, Advanced Micro Devices, Inc.
+// Copyright (C) 2025, Advanced Micro Devices, Inc.
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,34 +14,25 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <stdfloat>
 
 #include "xrt/xrt_bo.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 
-#include "common.h"
+// Clangd fix, remove
+#ifdef _CLANGD
+namespace std {
+using bfloat16_t = double;
+} // namespace std
+#endif
 
-#ifndef DATATYPES_USING_DEFINED
-#define DATATYPES_USING_DEFINED
-#ifndef DTYPE_IN
-#define DTYPE_IN std::bfloat16_t
-#endif
-#ifndef DTYPE_OUT
-#define DTYPE_OUT std::bfloat16_t
-#endif
-#ifndef DTYPE_ACC
-#define DTYPE_ACC float
-#endif
-using A_DATATYPE = DTYPE_IN;
-using B_DATATYPE = DTYPE_IN;
-using C_DATATYPE = DTYPE_OUT;
-using ACC_DATATYPE = DTYPE_ACC;
-#endif
+#include "../common.h"
+#include "helper.h"
+
+using EXTERNAL_DATATYPE = float;
+using BFP_C_DATATYPE = uint8_t;
 
 #define XSTR(X) STR(X)
 #define STR(X) #X
@@ -51,11 +42,15 @@ constexpr int verify_stochastic_n_samples = 1000;
 
 // Verification tolerance
 // See "Note on Numerical Tolerances" in README.md
-float abs_tol = matmul_common::get_abs_tol<C_DATATYPE>();
-float rel_tol = matmul_common::get_rel_tol<C_DATATYPE>();
+// TODO: This might have to be adjusted for bfp
+float abs_tol = matmul_common::get_abs_tol<std::bfloat16_t>();
+float rel_tol = matmul_common::get_rel_tol<std::bfloat16_t>();
 
 int main(int argc, const char *argv[]) {
-  // Program arguments parsing
+
+  // ------------------------------------------------------
+  // Parse program arguments
+  // ------------------------------------------------------
   cxxopts::Options options("Matrix Matrix Multiplication Test");
   cxxopts::ParseResult vm;
   matmul_common::add_default_options(options);
@@ -63,6 +58,8 @@ int main(int argc, const char *argv[]) {
   matmul_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
   int do_verify = vm["verify"].as<bool>();
+  // TODO: Remove this
+  do_verify = 0;
   int n_iterations = vm["iters"].as<int>();
   int n_warmup_iterations = vm["warmup"].as<int>();
   int trace_size = vm["trace_sz"].as<int>();
@@ -85,9 +82,9 @@ int main(int argc, const char *argv[]) {
   int B_VOLUME = N * K;
   int C_VOLUME = M * N;
 
-  size_t A_SIZE = (A_VOLUME * sizeof(A_DATATYPE));
-  size_t B_SIZE = (B_VOLUME * sizeof(B_DATATYPE));
-  size_t C_SIZE = (C_VOLUME * sizeof(C_DATATYPE));
+  size_t A_SIZE = (A_VOLUME * sizeof(uint8_t)) * 1.125;
+  size_t B_SIZE = (B_VOLUME * sizeof(uint8_t)) * 1.125;
+  size_t C_SIZE = (C_VOLUME * sizeof(uint8_t)) * 1.125;
 
   std::vector<uint32_t> instr_v =
       test_utils::load_instr_binary(vm["instr"].as<std::string>());
@@ -95,7 +92,9 @@ int main(int argc, const char *argv[]) {
   if (verbosity >= 1)
     std::cout << "Sequence instr count: " << instr_v.size() << "\n";
 
-  // Start the XRT test code
+  // ------------------------------------------------------
+  // Get device, load the xclbin & kernel and register them
+  // ------------------------------------------------------
   // Get a device handle
   unsigned int device_index = 0;
   auto device = xrt::device(device_index);
@@ -137,6 +136,10 @@ int main(int argc, const char *argv[]) {
     std::cout << "Getting handle to kernel:" << kernelName << "\n";
   auto kernel = xrt::kernel(context, kernelName);
 
+  // ------------------------------------------------------
+  // Initialize input/output buffer sizes and sync them
+  // ------------------------------------------------------
+
   auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int),
                           XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
   auto bo_a =
@@ -153,32 +156,59 @@ int main(int argc, const char *argv[]) {
   auto bo_trace = xrt::bo(device, tmp_trace_size * 4, XRT_BO_FLAGS_HOST_ONLY,
                           kernel.group_id(7));
 
+  // ------------------------------------------------------
+  // Generate data for buffers
+  // ------------------------------------------------------
   if (verbosity >= 1) {
     std::cout << "Writing data into buffer objects.\n";
   }
 
-  A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
-  std::vector<A_DATATYPE> AVec(A_VOLUME);
+  BFP_C_DATATYPE *bufA = bo_a.map<BFP_C_DATATYPE *>();
+  std::vector<EXTERNAL_DATATYPE> AVec(A_VOLUME);
   for (int i = 0; i < A_VOLUME; i++) {
-    AVec[i] = matmul_common::get_random<A_DATATYPE>();
-  }
-  memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
-  B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
-  std::vector<B_DATATYPE> BVec(B_VOLUME);
-  for (int i = 0; i < B_VOLUME; i++) {
-    BVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
-    // Diagonal:
-    // if(i % N == i / N) {
-    //   BVec[i] = 1.0;
+    // AVec[i] = matmul_common::get_random<EXTERNAL_DATATYPE>();
+    AVec[i] = i;
+    // if (i % N == i / N) {
+    //   AVec[i] = 1.0;
     // } else {
-    //   BVec[i] = 0.0;
+    //   AVec[i] = 0.0;
     // }
   }
-  memcpy(bufB, BVec.data(), (BVec.size() * sizeof(B_DATATYPE)));
+
+  BFP_C_DATATYPE *bufB = bo_b.map<BFP_C_DATATYPE *>();
+  std::vector<EXTERNAL_DATATYPE> BVec(B_VOLUME);
+  for (int i = 0; i < B_VOLUME; i++) {
+    // BVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    // Diagonal:
+    if (i % N == i / N) {
+      BVec[i] = 1.0;
+    } else {
+      BVec[i] = 0.0;
+    }
+  }
+
+  std::vector<uint8_t> AVecBlocked(A_VOLUME * 1.125);
+  bfp16QuantFloat(8, A_VOLUME, AVec.data(), AVecBlocked.data(), 0, 0);
+
+  // Debugging:
+  for (int i = 0; i < A_SIZE; i++) {
+    ((uint8_t *)AVecBlocked.data())[i] = i / 9;
+  }
+
+  // TODO: B will have to be transposed, ignoring this right now since I am
+  // trying out the identity matrix
+  std::vector<uint8_t> BVecBlocked(B_VOLUME * 1.125);
+  bfp16QuantFloat(8, B_VOLUME, BVec.data(), BVecBlocked.data(), 0, 0);
+
+  // ------------------------------------------------------
+  // Write data into buffers
+  // ------------------------------------------------------
+  memcpy(bufA, AVecBlocked.data(), A_SIZE);
+  memcpy(bufB, BVecBlocked.data(), B_SIZE);
 
   // Initialize outputs; bufOut is results matrix plus tracing info
   char *bufOut = bo_out.map<char *>();
-  std::vector<C_DATATYPE> CVec(C_VOLUME);
+  std::vector<uint8_t> CVecBlocked(C_VOLUME * 1.125);
   memset(bufOut, 0, C_SIZE);
 
   char *bufTrace = bo_trace.map<char *>();
@@ -207,6 +237,9 @@ int main(int argc, const char *argv[]) {
   if (trace_size > 0)
     bo_trace.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
+  // ------------------------------------------------------
+  // Run kernel
+  // ------------------------------------------------------
   unsigned num_iter = n_iterations + n_warmup_iterations;
   float npu_time_total = 0;
   float npu_time_min = 9999999;
@@ -239,8 +272,58 @@ int main(int argc, const char *argv[]) {
       continue;
     }
 
+    // ------------------------------------------------------
+    // Check output
+    // ------------------------------------------------------
+    // std::cout << "Expected:\n";
+    // for (uint32_t i = 0; i < C_SIZE; i++) {
+    //   if (i % 36 == 0) {
+    //     std::cout << "\n";
+    //     if (i % 64 == 0) {
+    //       std::cout << "\n";
+    //     }
+    //   }
+
+    //   if (i % 9 == 0) {
+    //     std::cout << " | B" << std::setw(3) << i / 9 << " - ";
+    //   }
+
+    //   std::cout << std::setw(4) << int(*(AVecBlocked.data() + i));
+    // }
+
+    std::cout << "\nOutput:\n";
+
+    std::vector<EXTERNAL_DATATYPE> CVec(C_VOLUME);
+    memcpy(CVecBlocked.data(), bufOut, C_SIZE);
+
+    for (uint32_t i = 0; i < C_SIZE; i++) {
+      if (i % 36 == 0) {
+        std::cout << "\n";
+        if (i % 72 == 0) {
+          std::cout << "\n";
+        }
+      }
+
+      if (i % 9 == 0) {
+        std::cout << " | B" << std::setw(3) << i / 9 << " - ";
+      }
+
+      std::cout << std::setw(4) << int(*(bufOut + i));
+    }
+
     if (do_verify) {
-      memcpy(CVec.data(), bufOut, (CVec.size() * sizeof(C_DATATYPE)));
+      memcpy(CVecBlocked.data(), bufOut, C_SIZE);
+
+      for (uint32_t i = 0; i < C_SIZE; i++) {
+        if (i % 9 == 0) {
+          std::cout << "Block " << i / 9 << "\n";
+        }
+
+        std::cout << int(*(bufOut + i)) << std::endl;
+      }
+
+      // Do the conversion from bfp16 to float
+      bfp16ebs8ToFloat(C_VOLUME * 1.125, CVecBlocked.data(), CVec.data(), 0);
       if (verbosity >= 1) {
         if (do_verify_stochastic) {
           std::cout << "Verifying " << verify_stochastic_n_samples
@@ -252,19 +335,19 @@ int main(int argc, const char *argv[]) {
       }
       auto vstart = std::chrono::system_clock::now();
       if (do_verify_stochastic) {
-        errors = matmul_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
-                                                  ACC_DATATYPE>(
+        errors = matmul_common::verify_stochastic<
+            EXTERNAL_DATATYPE, EXTERNAL_DATATYPE, EXTERNAL_DATATYPE>(
             M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity,
             abs_tol, rel_tol, b_col_maj);
       } else {
-        errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
+        errors = matmul_common::verify<EXTERNAL_DATATYPE, EXTERNAL_DATATYPE,
+                                       EXTERNAL_DATATYPE>(
             M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
       }
-      if (verbosity >= 2) {
-        std::cout << "C =" << std::endl;
-        matmul_common::print_matrix(CVec, K, 16, 16);
-      }
       auto vstop = std::chrono::system_clock::now();
+
+      matmul_common::print_matrix(CVec, N);
+
       float vtime =
           std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart)
               .count();
@@ -291,6 +374,9 @@ int main(int argc, const char *argv[]) {
                                    vm["trace_file"].as<std::string>());
   }
 
+  // ------------------------------------------------------
+  // Output results
+  // ------------------------------------------------------
   std::cout << std::endl
             << "Avg NPU matmul time: " << npu_time_total / n_iterations << "us."
             << std::endl;
@@ -308,15 +394,15 @@ int main(int argc, const char *argv[]) {
   if (!errors) {
     std::cout << "\nPASS!\n\n";
     return 0;
-  } else {
-    std::cout << "\nError count: " << errors;
-    if (do_verify_stochastic) {
-      std::cout << " (out of " << verify_stochastic_n_samples
-                << " random samples)";
-    }
-    std::cout << "\n\n";
-
-    std::cout << "\nFailed.\n\n";
-    return 1;
   }
+
+  std::cout << "\nError count: " << errors;
+  if (do_verify_stochastic) {
+    std::cout << " (out of " << verify_stochastic_n_samples
+              << " random samples)";
+  }
+  std::cout << "\n\n";
+
+  std::cout << "\nFailed.\n\n";
+  return 1;
 }
