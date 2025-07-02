@@ -26,6 +26,7 @@
 #include "test_utils.h"
 
 #include "../helper.h"
+#include "common.h"
 
 #include <stdfloat>
 
@@ -180,13 +181,16 @@ int main(int argc, const char *argv[]) {
   // ------------------------------------------------------
 
   // Calculate the expected output with fp
-  float expectedResult[numberFloats];
   float matrixSize = std::sqrt(numberFloats);
   if (matrixSize != std::floor(matrixSize)) {
     std::cout << "Matrix size is not square, cannot run test.\n";
     return 1;
   }
-  matrixMultiply(floatA, floatB, expectedResult, matrixSize);
+  // matrixMultiply(floatA, floatB, expectedResult, matrixSize);
+  std::vector<float> floatAVec(floatA, floatA + numberFloats);
+  std::vector<float> floatBVec(floatB, floatB + numberFloats);
+  std::vector<float> expectedResultVec(numberFloats);
+  matmul_common::matmul<float, float, float>(matrixSize, matrixSize, matrixSize, floatAVec, floatBVec, expectedResultVec, false);
 
   float outputTransformed[numberFloats];
   bfp16ebs8ToFloat(bfpBytesSize, bufOut, outputTransformed, 0);
@@ -200,15 +204,15 @@ int main(int argc, const char *argv[]) {
     // Note that this nearly equal function parameters are handpicked for this
     // particular example and do not reflect how the general case should be
     // handled for any bfp type.
-    if (!test_utils::nearly_equal(outputTransformed[i], expectedResult[i], 0.25,
+    if (!test_utils::nearly_equal(outputTransformed[i], expectedResultVec[i], 0.25,
                                   3.5)) {
       std::cout << "Error in output " << outputTransformed[i]
-                << " != " << expectedResult[i] << std::endl;
+                << " != " << expectedResultVec[i] << std::endl;
       errors++;
     } else {
       if (verbosity > 1)
         std::cout << "Correct output " << outputTransformed[i]
-                  << " ~= " << expectedResult[i] << std::endl;
+                  << " ~= " << expectedResultVec[i] << std::endl;
     }
   }
 

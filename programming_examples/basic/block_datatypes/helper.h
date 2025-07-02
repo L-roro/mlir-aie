@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <iomanip>
+#include <iostream>
 #include <random>
 
 // Helper function to generate random floating point numbers with high exponent
@@ -39,8 +41,8 @@ inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp,
 // The return array must be at least size * 1.125 and is structured as follows:
 // 1. The first byte is the shared exponent (max exponent of the block).
 // 2. The next *block* bytes are the quantized values.
-inline void bfp16QuantFloat(int block, int size, float *array,
-                            uint8_t *returnArray, int rounding, int verbose) {
+inline void floatToBfp16(int block, int size, float *array, uint8_t *returnArray, int rounding = 0,
+                         int verbose = 0) {
   int mbits = 7;
   int start = 0, end, i, j, int8 = 1;
   unsigned int sign, exp, maxExp;
@@ -90,8 +92,7 @@ inline void bfp16QuantFloat(int block, int size, float *array,
       shift = 23 - mbits + 1 + maxExp - exp;
       if (verbose) {
         printf("%d: shift=%d rounding=%d\n", i, shift, rounding);
-        printf("%d: AS READ         sign=%d exp=%d mantissa=0x%08x\n", i, sign,
-               exp, mantissa);
+        printf("%d: AS READ         sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
       }
 
       // Calculate rounding
@@ -106,8 +107,7 @@ inline void bfp16QuantFloat(int block, int size, float *array,
             if (j < shift)
               break; // some bit is set, not a tie case
             if (j == shift)
-              mantissa &=
-                  ~mask; // tie case, rounded to odd bits, adjust to even
+              mantissa &= ~mask; // tie case, rounded to odd bits, adjust to even
           }
           mask <<= 1;
         }
@@ -116,24 +116,21 @@ inline void bfp16QuantFloat(int block, int size, float *array,
         break;
       }
       if (verbose) {
-        printf("%d: ADDED ROUNDING  sign=%d exp=%d mantissa=0x%08x\n", i, sign,
-               exp, mantissa);
+        printf("%d: ADDED ROUNDING  sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
       }
-      if (mantissa &
-          0x01000000) { // rounding carried forward and need to adjust exponent
-        if (exp < maxExp) { // This will not result in shifting of max_exp
+      if (mantissa & 0x01000000) { // rounding carried forward and need to adjust exponent
+        if (exp < maxExp) {        // This will not result in shifting of max_exp
           mantissa >>= 1;
           exp += 1;
           shift -= 1;
           if (exp >= 255)
-            mantissa = 0; // overflow, signals infinity, should not happen
-        } else {          // Keep the current scale and round down
+            mantissa = 0;         // overflow, signals infinity, should not happen
+        } else {                  // Keep the current scale and round down
           mantissa -= 1 << shift; // Round down instead
         }
       }
       if (verbose) {
-        printf("%d: ADJUST CARRY    sign=%d exp=%d mantissa=0x%08x\n", i, sign,
-               exp, mantissa);
+        printf("%d: ADJUST CARRY    sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
       }
 
       // Perform shift
@@ -145,8 +142,7 @@ inline void bfp16QuantFloat(int block, int size, float *array,
       }
 
       if (verbose) {
-        printf("%d: SHIFTED         sign=%d exp=%d mantissa=0x%08x\n", i, sign,
-               exp, mantissa);
+        printf("%d: SHIFTED         sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
       }
       if (mantissa) {
         if (shift < 32)
@@ -162,8 +158,7 @@ inline void bfp16QuantFloat(int block, int size, float *array,
       }
       *p = value;
       if (verbose) {
-        printf("%d: TO BE WRITTEN   sign=%d exp=%d mantissa=0x%08x\n", i, sign,
-               exp, mantissa);
+        printf("%d: TO BE WRITTEN   sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
         printf("%d: value = %f\n", i, *(array + i));
         printf("%d: value_int8 = 0x%08x\n", int8, valueInt8);
         printf("max_exp = %d\n", maxExp);
@@ -184,9 +179,9 @@ inline void bfp16QuantFloat(int block, int size, float *array,
 
 // Convert a bfp16 array to a float.
 // Assumes the return array is large enough to hold the result.
-// Size should be the number of bytes in the input bfp16 array and returnArray should be at least size/1.125 in size.
-inline void bfp16ebs8ToFloat(int size, uint8_t *array, float *returnArray,
-                             int verbose) {
+// Size should be the number of bytes in the input bfp16 array and returnArray should be at least
+// size/1.125 in size.
+inline void bfp16ebs8ToFloat(int size, uint8_t *array, float *returnArray, int verbose) {
   int block = 8;
   int tempIndx = 0;
   for (int i = 0; i < size; i += block + 1) {
@@ -212,19 +207,43 @@ inline void bfp16ebs8ToFloat(int size, uint8_t *array, float *returnArray,
   }
 }
 
-// Helper function to perform a matrix multiplication of two square matrices.
-// All three matrices should be of size size x size.
-template <typename T>
-inline void matrixMultiply(T *aIn, T *bIn, T *cOut, int size) {
-  for (int i = 0; i < size * size; ++i) {
-    cOut[i] = 0;
-  }
-
-  for (int i = 0; i < size; ++i) {
-    for (int j = 0; j < size; ++j) {
-      for (int k = 0; k < size; ++k) {
-        cOut[i * size + j] += aIn[i * size + k] * bIn[k * size + j];
+// Shuffle a 64x64 matrix stored in a 1D array.
+// This function rearranges the 8x8 subtiles into rows so that a single tile is contiguous in
+// memory. The arrays are expected to be of size 64x64x1.125=4608 bytes.
+inline void shuffle64x64Matrix(uint8_t *matrix, uint8_t *result, bool unshuffle = 0) {
+  int idx = 0;
+  for (int i4 = 0; i4 < 8; i4++) {       // size_4 = m/r = 8, stride_4 = r*(k+8) = 576
+    for (int i3 = 0; i3 < 8; i3++) {     // size_3 = k/s = 8, stride_3 = s+1 = 9
+      for (int i2 = 0; i2 < 8; i2++) {   // size_2 = r = 8, stride_2 = k+8 = 72
+        for (int i1 = 0; i1 < 9; i1++) { // size_1 = s+1 = 9, stride_1 = 1
+          if (!unshuffle)
+            result[idx] = matrix[i4 * 576 + i3 * 9 + i2 * 72 + i1];
+          else
+            result[i4 * 576 + i3 * 9 + i2 * 72 + i1] = matrix[idx];
+          idx++;
+        }
       }
     }
+  }
+}
+
+// Pretty print to std::cout a bfp16ebs8 array
+inline void printBfp16ebs8Array(int arraySize, uint8_t *array, int blocksPerLine = 4,
+                                int blocksBeforeEmptyLine = 8, int width = 3,
+                                const std::string &blockSeparatorStart = " | B",
+                                const std::string &blockSeparatorEnd = " - ") {
+  for (int i = 0; i < arraySize; i++) {
+    if (i % blocksPerLine == 0) {
+      std::cout << "\n";
+      if (i % blocksBeforeEmptyLine * 9 == 0) {
+        std::cout << "\n";
+      }
+    }
+
+    if (i % 9 == 0) {
+      std::cout << blockSeparatorStart << std::setw(width) << i / 9 << " - ";
+    }
+
+    std::cout << std::setw(4) << int(array[i]);
   }
 }
