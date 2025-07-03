@@ -1,0 +1,327 @@
+//===- test.cpp -------------------------------------------------*- C++ -*-===//
+//
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Copyright (C) 2025, Advanced Micro Devices, Inc.
+//
+//===----------------------------------------------------------------------===//
+
+#include <bits/stdc++.h>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <ctime>
+#include <iostream>
+#include <stdfloat>
+#include <vector>
+
+#include "xrt/xrt_bo.h"
+#include "xrt/xrt_device.h"
+#include "xrt/xrt_kernel.h"
+
+// Clangd fix, remove
+#ifdef _CLANGD
+namespace std {
+using bfloat16_t = double;
+} // namespace std
+#endif
+
+#include "../helper.h"
+#include "common.h"
+
+#define XSTR(X) STR(X)
+#define STR(X) #X
+
+// Verification tolerance
+// See "Note on Numerical Tolerances" in README.md
+// TODO: This might have to be adjusted for bfp
+float abs_tol = matmul_common::get_abs_tol<std::bfloat16_t>();
+float rel_tol = matmul_common::get_rel_tol<std::bfloat16_t>();
+
+int main(int argc, const char *argv[]) {
+
+  // ------------------------------------------------------
+  // Parse program arguments
+  // ------------------------------------------------------
+  cxxopts::Options options("Matrix Matrix Multiplication Test");
+  cxxopts::ParseResult vm;
+  matmul_common::add_default_options(options);
+
+  matmul_common::parse_options(argc, argv, options, vm);
+  int verbosity = vm["verbosity"].as<int>();
+  int do_verify = vm["verify"].as<bool>();
+  int n_iterations = vm["iters"].as<int>();
+  int n_warmup_iterations = vm["warmup"].as<int>();
+  int trace_size = vm["trace_sz"].as<int>();
+  int b_col_maj = vm["b_col_maj"].as<int>();
+
+  // Fix the seed to ensure reproducibility in CI.
+  srand(1726250518); // srand(time(NULL));
+
+  int M = vm["M"].as<int>();
+  int K = vm["K"].as<int>();
+  int N = vm["N"].as<int>();
+
+  if (verbosity >= 1) {
+    std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
+  }
+
+  int A_SIZE = M * K;
+  int B_SIZE = N * K;
+  int C_SIZE = M * N;
+
+  size_t A_VOLUME = (A_SIZE * sizeof(uint8_t)) * 1.125;
+  size_t B_VOLUME = (B_SIZE * sizeof(uint8_t)) * 1.125;
+  size_t C_VOLUME = (C_SIZE * sizeof(uint8_t)) * 1.125;
+
+  std::vector<uint32_t> instr_v = test_utils::load_instr_binary(vm["instr"].as<std::string>());
+
+  if (verbosity >= 1)
+    std::cout << "Sequence instr count: " << instr_v.size() << "\n";
+
+  // ------------------------------------------------------
+  // Get device, load the xclbin & kernel and register them
+  // ------------------------------------------------------
+  // Get a device handle
+  unsigned int device_index = 0;
+  auto device = xrt::device(device_index);
+
+  // Load the xclbin
+  if (verbosity >= 1)
+    std::cout << "Loading xclbin: " << vm["xclbin"].as<std::string>() << "\n";
+  auto xclbin = xrt::xclbin(vm["xclbin"].as<std::string>());
+
+  if (verbosity >= 1)
+    std::cout << "Kernel opcode: " << vm["kernel"].as<std::string>() << "\n";
+  std::string Node = vm["kernel"].as<std::string>();
+
+  // Get the kernel from the xclbin
+  auto xkernels = xclbin.get_kernels();
+  auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(), [Node, verbosity](xrt::xclbin::kernel &k) {
+    auto name = k.get_name();
+    if (verbosity >= 1) {
+      std::cout << "Name: " << name << std::endl;
+    }
+    return name.rfind(Node, 0) == 0;
+  });
+  auto kernelName = xkernel.get_name();
+
+  if (verbosity >= 1)
+    std::cout << "Registering xclbin: " << vm["xclbin"].as<std::string>() << "\n";
+
+  device.register_xclbin(xclbin);
+
+  // get a hardware context
+  if (verbosity >= 1)
+    std::cout << "Getting hardware context.\n";
+  xrt::hw_context context(device, xclbin.get_uuid());
+
+  // get a kernel handle
+  if (verbosity >= 1)
+    std::cout << "Getting handle to kernel:" << kernelName << "\n";
+  auto kernel = xrt::kernel(context, kernelName);
+
+  // ------------------------------------------------------
+  // Initialize input/output buffer sizes and sync them
+  // ------------------------------------------------------
+
+  auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+  auto bo_a = xrt::bo(device, A_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
+  auto bo_b = xrt::bo(device, B_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
+  auto bo_out = xrt::bo(device, C_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
+
+  // ------------------------------------------------------
+  // Generate data for buffers
+  // ------------------------------------------------------
+  if (verbosity >= 1) {
+    std::cout << "Writing data into buffer objects.\n";
+  }
+
+  std::vector<float> AVec(A_SIZE);
+  for (int i = 0; i < A_SIZE; i++) {
+    // Limiting to 16 to avoid precision loss issues
+    // AVec[i] = (float)((rand() % 16));
+    // AVec[i] = i;
+    // if (i % N == i / N) {
+    //   AVec[i] = 1.0;
+    // } else {
+    //   AVec[i] = 0.0;
+    // }
+
+    AVec[i] = (i / 8) % 1000;
+  }
+
+  std::vector<float> BVec(B_SIZE);
+  for (int i = 0; i < B_SIZE; i++) {
+    // Limiting to 16 to avoid precision loss issues
+    // BVec[i] = (float)((rand() % 16));
+    // Diagonal:
+    // if (i % N == i / N) {
+    //   BVec[i] = 1.0;
+    // } else {
+    //   BVec[i] = 0.0;
+    // }
+
+    BVec[i] = i % 8;
+  }
+
+  auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
+
+  std::vector<uint8_t> AVecBfpShuffled(A_VOLUME);
+  // shuffle64x64Matrix(AVecBfp.data(), AVecBfpShuffled.data());
+
+  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
+
+  std::vector<uint8_t> BVecBfpShuffled(B_VOLUME);
+  // shuffle64x64Matrix(BVecBfp.data(), BVecBfpShuffled.data());
+
+  printf("AVecBfp size: %zu\n", AVecBfp.size());
+  auto temp = shuffleMatrixForBfp16ebs8(256, 256, AVecBfp);
+  auto testAnew = bfp16ebs8ToFloat(A_VOLUME, temp.data());
+
+  // std::vector<uint8_t> AVecBfpShuffledAli(A_VOLUME);
+  // for(int j4 = 0; j4 < 4; j4++){ // size_4 = 256/64 = 4, stride_4 = 64*(256+32) = 18432
+  //   for(int j3 = 0; j3 < 4; j3++){ // size_3 = 256/64 = 4, stride_3 = 64+8 = 72
+  //     // This is one block of 64x64
+  //     int temp_indx = j4*18432 + j3*72;
+  //     for (int i4 = 0; i4 < 8; i4++) { // size_4 = m/r = 8, stride_4 = r*(k+8) = 576 -> 2304 works with j4*18432
+  //       for (int i3 = 0; i3 < 8; i3++) { // size_3 = k/s = 8, stride_3 = s+1 = 9 -> 9 works with j3*72
+  //         for (int i2 = 0; i2 < 8; i2++) { // size_2 = r = 8, stride_2 = k+8 = 72 -> 288
+  //           for (int i1 = 0; i1 < 9; i1++) { // size_1 = s+1 = 9, stride_1 = 1
+  //             AVecBfpShuffledAli[temp_indx] = AVecBfp[i4*2304 + i3*9 + i2*288 + i1 + j4*18432 + j3*72];
+  //             temp_indx++;
+  //             if(temp_indx % 72 == 0){
+  //               temp_indx += 216;
+  //             }
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
+
+  // auto aliTest = bfp16ebs8ToFloat(A_VOLUME, AVecBfpShuffledAli.data());
+
+  // std::ofstream outfile1("ali_matrix.txt");
+  // matmul_common::print_matrix(aliTest, K, M, K, outfile1, " ", " ... ", 0);
+
+  // std::ofstream outfile2("testAnew_matrix.txt");
+  // matmul_common::print_matrix(testAnew, K, M, K, outfile2, " ", " ... ", 0);
+  // outfile1.close();
+  // outfile2.close();
+
+  // printf("AVec: \n");
+  // matmul_common::print_matrix(AVec, 128, 128, 73, std::cout, " ", " ... ", 0);
+  // printBfp16ebs8Array(A_VOLUME, AVecBfp);
+  // printf("AVecBfpShuffled: \n");
+  // matmul_common::print_matrix(testAnew, 128, 128, 73, std::cout, " ", " ... ", 0);
+  // printBfp16ebs8Array(A_VOLUME, temp);
+
+  // ------------------------------------------------------
+  // Write data into buffers
+  // ------------------------------------------------------
+  uint8_t *bufA = bo_a.map<uint8_t *>();
+  uint8_t *bufB = bo_b.map<uint8_t *>();
+  memcpy(bufA, AVecBfpShuffled.data(), A_VOLUME);
+  memcpy(bufB, BVecBfpShuffled.data(), B_VOLUME);
+
+  // Initialize outputs; bufOut is results matrix
+  char *bufOut = bo_out.map<char *>();
+  std::vector<uint8_t> CVecBfp(C_VOLUME);
+
+  // Instruction buffer for DMA configuration
+  void *bufInstr = bo_instr.map<void *>();
+  memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+
+  bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo_out.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+  // ------------------------------------------------------
+  // Run kernel
+  // ------------------------------------------------------
+  unsigned num_iter = n_iterations + n_warmup_iterations;
+  float npu_time_total = 0;
+  float npu_time_min = 9999999;
+  float npu_time_max = 0;
+
+  int errors = 0;
+  float macs = 2.0 * float(M) * float(K) * float(N);
+
+  for (unsigned iter = 0; iter < num_iter; iter++) {
+    auto start = std::chrono::high_resolution_clock::now();
+    unsigned int opcode = 3;
+    // auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out);
+    // ert_cmd_state r = run.wait();
+    // if (r != ERT_CMD_STATE_COMPLETED) {
+    //   std::cout << "Kernel did not complete. Returned status: " << r << "\n";
+    //   return 1;
+    // }
+    auto stop = std::chrono::high_resolution_clock::now();
+    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+
+    if (iter < n_warmup_iterations) {
+      /* Warmup iterations do not count towards average runtime. */
+      continue;
+    }
+
+    // ------------------------------------------------------
+    // Check output
+    // ------------------------------------------------------
+    if (do_verify) {
+      memcpy(CVecBfp.data(), bufOut, C_VOLUME);
+
+      std::vector<uint8_t> CVecBfpShuffled(C_VOLUME);
+      shuffle64x64Matrix(CVecBfp.data(), CVecBfpShuffled.data(), true);
+
+      auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfpShuffled.data(), 0);
+
+      if (verbosity >= 1) {
+        std::cout << "Verifying against reference matmul ..." << std::endl;
+      }
+      auto vstart = std::chrono::system_clock::now();
+      errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, true);
+      auto vstop = std::chrono::system_clock::now();
+
+      float vtime = std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart).count();
+      if (verbosity >= 1) {
+        std::cout << "Verify time: " << vtime << " s." << std::endl;
+      }
+    } else {
+      if (verbosity >= 1)
+        std::cout << "WARNING: matmul results not verified." << std::endl;
+    }
+
+    float npu_time = std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
+
+    npu_time_total += npu_time;
+    npu_time_min = (npu_time < npu_time_min) ? npu_time : npu_time_min;
+    npu_time_max = (npu_time > npu_time_max) ? npu_time : npu_time_max;
+  }
+
+  // ------------------------------------------------------
+  // Output results
+  // ------------------------------------------------------
+  std::cout << std::endl << "Avg NPU matmul time: " << npu_time_total / n_iterations << "us." << std::endl;
+  std::cout << "Avg NPU gflops: " << macs / (1000 * npu_time_total / n_iterations) << std::endl;
+
+  std::cout << std::endl << "Min NPU matmul time: " << npu_time_min << "us." << std::endl;
+  std::cout << "Max NPU gflops: " << macs / (1000 * npu_time_min) << std::endl;
+
+  std::cout << std::endl << "Max NPU matmul time: " << npu_time_max << "us." << std::endl;
+  std::cout << "Min NPU gflops: " << macs / (1000 * npu_time_max) << std::endl;
+
+  if (!errors) {
+    std::cout << "\nPASS!\n\n";
+    return 0;
+  }
+
+  std::cout << "\nError count: " << errors;
+  std::cout << "\n\n";
+
+  std::cout << "\nFailed.\n\n";
+  return 1;
+}
