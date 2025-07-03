@@ -15,18 +15,19 @@
 #include <cstdio>
 #include <iomanip>
 #include <iostream>
+#include <ostream>
 #include <random>
+#include <vector>
 
 // Helper function to generate random floating point numbers with high exponent
 // variance (useful for blocked datatypes). Exponents are interpreted as base 2
-inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp,
-                                         double maxExp) {
+inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp, double maxExp) {
   std::uniform_real_distribution<float> distrExp(minExp, maxExp);
   float exponent = distrExp(eng);
 
   std::uniform_real_distribution<float> distrMantissa(0.0, 1.0);
   float mantissa = distrMantissa(eng);
-  
+
   return mantissa * std::pow(2.0, exponent);
 }
 
@@ -37,12 +38,12 @@ inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp,
 // rounding - 0 for zero, 1 for nearest (tie to even)
 // verbose - make some noise
 // Quantization of an array of floats to bfp16.
-// The input array will be used as a scratchpad!
-// The return array must be at least size * 1.125 and is structured as follows:
+// The return array is structured as follows:
 // 1. The first byte is the shared exponent (max exponent of the block).
 // 2. The next *block* bytes are the quantized values.
-inline void floatToBfp16(int block, int size, float *array, uint8_t *returnArray, int rounding = 0,
-                         int verbose = 0) {
+std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0, int verbose = 0) {
+  std::vector<uint8_t> res(size * 1.125);
+
   int mbits = 7;
   int start = 0, end, i, j, int8 = 1;
   unsigned int sign, exp, maxExp;
@@ -163,25 +164,27 @@ inline void floatToBfp16(int block, int size, float *array, uint8_t *returnArray
         printf("%d: value_int8 = 0x%08x\n", int8, valueInt8);
         printf("max_exp = %d\n", maxExp);
       }
-      returnArray[int8] = valueInt8;
+      res[int8] = valueInt8;
       int8++;
 
       if (maxShift < shift)
         maxShift = shift;
     }
-    returnArray[int8 - 9] = (uint8_t)maxExp;
+    res[int8 - 9] = (uint8_t)maxExp;
     int8++;
     start = end;
     if (start >= size)
       break;
   }
+
+  return res;
 }
 
 // Convert a bfp16 array to a float.
-// Assumes the return array is large enough to hold the result.
-// Size should be the number of bytes in the input bfp16 array and returnArray should be at least
-// size/1.125 in size.
-inline void bfp16ebs8ToFloat(int size, uint8_t *array, float *returnArray, int verbose) {
+// Size should be the number of bytes in the input bfp16 array
+inline std::vector<float> bfp16ebs8ToFloat(int size, uint8_t *array, int verbose = 0) {
+  std::vector<float> res(size / 1.125);
+
   int block = 8;
   int tempIndx = 0;
   for (int i = 0; i < size; i += block + 1) {
@@ -198,13 +201,15 @@ inline void bfp16ebs8ToFloat(int size, uint8_t *array, float *returnArray, int v
       printf("multiplier = %f\n", multiplier);
     }
     for (int j = 1; j < block + 1; j++) {
-      returnArray[tempIndx] = float(array[i + j] * multiplier);
+      res[tempIndx] = float(array[i + j] * multiplier);
       if (verbose) {
-        printf("return_array[%d] = %f\n", tempIndx, returnArray[tempIndx]);
+        printf("return_array[%d] = %f\n", tempIndx, res[tempIndx]);
       }
       tempIndx++;
     }
   }
+
+  return res;
 }
 
 // Shuffle a 64x64 matrix stored in a 1D array.
@@ -227,15 +232,74 @@ inline void shuffle64x64Matrix(uint8_t *matrix, uint8_t *result, bool unshuffle 
   }
 }
 
+// Shuffle tiles of 64x64 elements for the matrix
+// Width and height are expected to be the number of scalar elements in the matrix
+inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t height, std::vector<uint8_t> bfpMatrix,
+                                                      bool unshuffle = 0) {
+  assert(width % 64 == 0 && "Matrix width must be divisible by tile dimension");
+  assert(width % 64 == 0 && "Matrix height must be divisible by tile dimension");
+  assert(bfpMatrix.size() == (size_t)width * height * 1.125 && "Matrix size must be width*height*1.125");
+
+  width = width * 1.125;
+  std::vector<uint8_t> res(width * height);
+
+  size_t tileWidth = 64 * 1.125;
+  size_t tileHeight = 64;
+
+  size_t subtileWidth = 8 * 1.125;
+  size_t subtileHeight = 8;
+
+  // The main idea is that inputGlobal X and Y are traversing the input matrix in the order we want the elements to be
+  // accessed by the core, while outputGlobal X and Y are traversing the tiles in the way they are going to be sent to the accelerator.
+  // Essentially, outputGlobal X and Y are just traversing the tiles themselves as if they were contiguous and then going to the next tile.
+
+  // Iterate over the tiles in the matrix
+  for (size_t tileStartY = 0; tileStartY < height; tileStartY += tileHeight) {
+    for (size_t tileStartX = 0; tileStartX < width; tileStartX += tileWidth) {
+
+      size_t tileCountingIndex = 0;
+      // Iterate over the subtiles in each tile
+      for (size_t subtileStartY = 0; subtileStartY < tileHeight; subtileStartY += subtileHeight) {
+        for (size_t subtileStartX = 0; subtileStartX < tileWidth; subtileStartX += subtileWidth) {
+
+          // Iterate over the elements in each subtile
+          for (size_t i = 0; i < subtileHeight; ++i) {
+            for (size_t j = 0; j < subtileWidth; ++j) {
+              size_t inputGlobalX = tileStartX + subtileStartX + j;
+              size_t inputGlobalY = tileStartY + subtileStartY + i;
+              size_t inputIndex = inputGlobalY * width + inputGlobalX;
+
+              size_t outputGlobalX = tileStartX + tileCountingIndex % tileWidth;
+              size_t outputGlobalY = tileStartY + tileCountingIndex / tileWidth;
+              size_t outputIndex = outputGlobalY * width + outputGlobalX;
+
+              if (!unshuffle) {
+                // printf("bfpMatrix[index] = %d\n", bfpMatrix[index]);
+                res[outputIndex] = bfpMatrix[inputIndex];
+                // res[countingIndex] = index;
+              } else {
+                res[inputIndex] = bfpMatrix[outputIndex];
+              }
+              tileCountingIndex++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return res;
+}
+
 // Pretty print to std::cout a bfp16ebs8 array
-inline void printBfp16ebs8Array(int arraySize, uint8_t *array, int blocksPerLine = 4,
+inline void printBfp16ebs8Array(int arraySize, std::vector<uint8_t> array, int blocksPerLine = 4,
                                 int blocksBeforeEmptyLine = 8, int width = 3,
                                 const std::string &blockSeparatorStart = " | B",
                                 const std::string &blockSeparatorEnd = " - ") {
   for (int i = 0; i < arraySize; i++) {
-    if (i % blocksPerLine == 0) {
+    if (i % (blocksPerLine * 9) == 0) {
       std::cout << "\n";
-      if (i % blocksBeforeEmptyLine * 9 == 0) {
+      if (i % (blocksBeforeEmptyLine * 9) == 0) {
         std::cout << "\n";
       }
     }
@@ -246,4 +310,6 @@ inline void printBfp16ebs8Array(int arraySize, uint8_t *array, int blocksPerLine
 
     std::cout << std::setw(4) << int(array[i]);
   }
+
+  std::cout << std::endl;
 }

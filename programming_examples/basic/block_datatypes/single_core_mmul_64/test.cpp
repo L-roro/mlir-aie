@@ -15,6 +15,7 @@
 #include <ctime>
 #include <iostream>
 #include <stdfloat>
+#include <vector>
 
 #include "xrt/xrt_bo.h"
 #include "xrt/xrt_device.h"
@@ -29,9 +30,6 @@ using bfloat16_t = double;
 
 #include "../helper.h"
 #include "common.h"
-
-using EXTERNAL_DATATYPE = float;
-using BFP_C_DATATYPE = uint8_t;
 
 #define XSTR(X) STR(X)
 #define STR(X) #X
@@ -143,8 +141,7 @@ int main(int argc, const char *argv[]) {
     std::cout << "Writing data into buffer objects.\n";
   }
 
-  BFP_C_DATATYPE *bufA = bo_a.map<BFP_C_DATATYPE *>();
-  std::vector<EXTERNAL_DATATYPE> AVec(A_SIZE);
+  std::vector<float> AVec(A_SIZE);
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
     AVec[i] = (float)((rand() % 16));
@@ -158,8 +155,7 @@ int main(int argc, const char *argv[]) {
     // AVec[i] = i / 8;
   }
 
-  BFP_C_DATATYPE *bufB = bo_b.map<BFP_C_DATATYPE *>();
-  std::vector<EXTERNAL_DATATYPE> BVec(B_SIZE);
+  std::vector<float> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
     BVec[i] = (float)((rand() % 16));
@@ -173,27 +169,27 @@ int main(int argc, const char *argv[]) {
     // BVec[i] = i / 8;
   }
 
-  std::vector<uint8_t> AVecBlocked(A_VOLUME);
-  floatToBfp16(8, A_SIZE, AVec.data(), AVecBlocked.data(), 0, 0);
+  auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
 
-  uint8_t tempBfp16A_shuffled[A_VOLUME];
-  shuffle64x64Matrix(AVecBlocked.data(), tempBfp16A_shuffled);
+  std::vector<uint8_t> AVecBfpShuffled(A_VOLUME);
+  shuffle64x64Matrix(AVecBfp.data(), AVecBfpShuffled.data());
 
-  std::vector<uint8_t> BVecBlocked(B_VOLUME);
-  floatToBfp16(8, B_SIZE, BVec.data(), BVecBlocked.data(), 0, 0);
+  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
 
-  uint8_t tempBfp16B_shuffled[B_VOLUME];
-  shuffle64x64Matrix(BVecBlocked.data(), tempBfp16B_shuffled);
+  std::vector<uint8_t> BVecBfpShuffled(B_VOLUME);
+  shuffle64x64Matrix(BVecBfp.data(), BVecBfpShuffled.data());
 
   // ------------------------------------------------------
   // Write data into buffers
   // ------------------------------------------------------
-  memcpy(bufA, tempBfp16A_shuffled, A_VOLUME);
-  memcpy(bufB, tempBfp16B_shuffled, B_VOLUME);
+  uint8_t *bufA = bo_a.map<uint8_t *>();
+  uint8_t *bufB = bo_b.map<uint8_t *>();
+  memcpy(bufA, AVecBfpShuffled.data(), A_VOLUME);
+  memcpy(bufB, BVecBfpShuffled.data(), B_VOLUME);
 
-  // Initialize outputs; bufOut is results matrix plus tracing info
+  // Initialize outputs; bufOut is results matrix
   char *bufOut = bo_out.map<char *>();
-  std::vector<uint8_t> CVecBlocked(C_VOLUME);
+  std::vector<uint8_t> CVecBfp(C_VOLUME);
 
   // Instruction buffer for DMA configuration
   void *bufInstr = bo_instr.map<void *>();
@@ -236,21 +232,19 @@ int main(int argc, const char *argv[]) {
     // Check output
     // ------------------------------------------------------
     if (do_verify) {
-      memcpy(CVecBlocked.data(), bufOut, C_VOLUME);
+      memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
-      uint8_t tempBfp16C_shuffled[C_VOLUME];
-      shuffle64x64Matrix(CVecBlocked.data(), tempBfp16C_shuffled, true);
+      std::vector<uint8_t> CVecBfpShuffled(C_VOLUME);
+      shuffle64x64Matrix(CVecBfp.data(), CVecBfpShuffled.data(), true);
 
-      std::vector<EXTERNAL_DATATYPE> CVec(C_SIZE);
-
-      bfp16ebs8ToFloat(C_VOLUME, tempBfp16C_shuffled, CVec.data(), 0);
+      auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfpShuffled.data(), 0);
 
       if (verbosity >= 1) {
         std::cout << "Verifying against reference matmul ..." << std::endl;
       }
       auto vstart = std::chrono::system_clock::now();
-      errors = matmul_common::verify<EXTERNAL_DATATYPE, EXTERNAL_DATATYPE, EXTERNAL_DATATYPE>(
-          M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, true);
+      errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity,
+                                                          abs_tol, rel_tol, true);
       auto vstop = std::chrono::system_clock::now();
 
       float vtime = std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart).count();
