@@ -5,10 +5,11 @@
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc. or its affiliates
 import argparse
+from ml_dtypes import bfloat16
 import numpy as np
 
 from aie.dialects.aiex import v8bfp16ebs8
-from aie.helpers.taplib import TensorAccessSequence, TensorTiler2D
+from aie.helpers.taplib.tensortiler2d import TensorTiler2D
 from aie.iron import Kernel, ObjectFifo, Program, Runtime, Worker
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU2
@@ -17,7 +18,6 @@ from aie.iron.placers import SequentialPlacer
 
 def ceildiv(a, b):
     return (a + b - 1) // b
-
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -33,37 +33,42 @@ def main():
     args = argparser.parse_args()
     print(my_matmul(args.M, args.K, args.N, args.m, args.k, args.n))
 
-
 def my_matmul(M, K, N, m, k, n):
     M_div_m = M // m
     K_div_k = K // k
     N_div_n = N // n
     tiles = M_div_m * N_div_n
 
-    # Define tensor types
-    A_ty = np.ndarray[(M * K // 8,), np.dtype[v8bfp16ebs8]]
-    B_ty = np.ndarray[(K * N // 8,), np.dtype[v8bfp16ebs8]]
-    C_ty = np.ndarray[(M * N // 8,), np.dtype[v8bfp16ebs8]]
-    a_ty = np.ndarray[(m, k // 8), np.dtype[v8bfp16ebs8]]
-    b_ty = np.ndarray[(k, n // 8), np.dtype[v8bfp16ebs8]]
-    c_ty = np.ndarray[(m, n // 8), np.dtype[v8bfp16ebs8]]
+    r = 8
+    s = 8
+    t = 8
 
-    zero_kernel = Kernel(f"zero_kernel", f"mm_{m}x{k}x{n}.o", [c_ty])
+    # Define tensor types
+    A_ty = np.ndarray[(M * K,), np.dtype[bfloat16]]
+    B_ty = np.ndarray[(K * N // 8,), np.dtype[v8bfp16ebs8]]
+    C_ty = np.ndarray[(M * N,), np.dtype[bfloat16]]
+    a_ty = np.ndarray[(m * k,), np.dtype[bfloat16]]
+    b_ty = np.ndarray[(k * n // 8,), np.dtype[v8bfp16ebs8]]
+    c_ty = np.ndarray[(m * n,), np.dtype[bfloat16]]
+
+    zero_kernel = Kernel(f"zero_kernel_bf16", f"mm_{m}x{k}x{n}.o", [c_ty])
     matmul_kernel = Kernel(
-        "matmul_vectorized_bfp16",
+        "matmul_vectorized_different_datatypes",
         f"mm_{m}x{k}x{n}.o",
         [a_ty, b_ty, c_ty],
     )
 
     inA = ObjectFifo(a_ty, name="inA")
-    memA = inA.cons().forward(name="memA")
+    a_dims = [(m // r, r * k), (k // s, s), (r, k), (s, 1)]
+    memA = inA.cons().forward(name="memA", dims_to_stream=a_dims)
 
     inB = ObjectFifo(b_ty, name="inB")
     b_dims = [(8, 8), (8, 64), (8, 1)]
     memB = inB.cons().forward(name="memB", dims_to_stream=b_dims)
 
     memC = ObjectFifo(c_ty, name="memC")
-    outC = memC.cons().forward(name="outC")
+    c_dims = [(m // r, r * n), (r, t), (n // t, r * t), (t, 1)]
+    outC = memC.cons().forward(name="outC", dims_to_stream=c_dims)
 
     def core_fn(of_a, of_b, of_c, zero, matmul):
         for _ in range_(tiles) if tiles > 1 else range(1):
@@ -82,18 +87,18 @@ def my_matmul(M, K, N, m, k, n):
     worker = Worker(
         core_fn,
         [memA.cons(), memB.cons(), memC.prod(), zero_kernel, matmul_kernel],
-        stack_size=0xD00,
+        stack_size=0xF00,
     )
 
     rows_per_block = 4
 
     A_tiles = TensorTiler2D.group_tiler(
-        (M, K // 8), (m, k // 8), (1, K_div_k), pattern_repeat=N_div_n
+        (M, K), (m, k), (1, K_div_k), pattern_repeat=N_div_n
     )
     b_tap = TensorTiler2D.group_tiler((K, N // 8), (k, n // 8), (K_div_k, N_div_n))[0]
 
     C_tiles = TensorTiler2D.group_tiler(
-        (M, N // 8), (m, n // 8), (rows_per_block // 2, N_div_n)
+        (M, N), (m, n), (rows_per_block // 2, N_div_n)
     )
     c_index = 0
 

@@ -23,6 +23,17 @@ void zero_vectorized_v64bfp16ebs8(bfp16ebs8 *__restrict cOut) {
   }
 }
 
+template <typename T, int M, int N>
+void zero_vectorized(T *__restrict c) {
+  constexpr int r = 512 / (sizeof(T) * 8);
+  static_assert((M * N) % r == 0);
+  const aie::vector<T, r> zeros = aie::zeros<T, r>();
+  const T *__restrict c_end = c + M * N;
+  for (; c < c_end; c += r) {
+    aie::store_v(c, zeros);
+  }
+}
+
 // This kernel mirrors the one found in https://xilinx.github.io/aie_api/group__group__mmul.html
 // Go through them in parallel to understand how the bfp datatype modifies accesses to memory
 template <unsigned rowA, unsigned colA, unsigned colB, unsigned r, unsigned s, unsigned t>
@@ -185,4 +196,6 @@ void matmul_vectorized_different_datatypes(bfloat16 *__restrict pA, bfp16ebs8 *_
 }
 
 void zero_kernel(bfp16ebs8 *__restrict cOut) { zero_vectorized_v64bfp16ebs8<64, 64>(cOut); }
+
+void zero_kernel_bf16(bfloat16 *__restrict cOut) { zero_vectorized<bfloat16, 64, 64>(cOut); }
 }
