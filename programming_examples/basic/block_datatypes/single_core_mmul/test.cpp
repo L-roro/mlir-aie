@@ -142,7 +142,7 @@ int main(int argc, const char *argv[]) {
   std::vector<float> AVec(A_SIZE);
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    // AVec[i] = (float)((rand() % 16));
+    AVec[i] = (float)((rand() % 16));
     // AVec[i] = i;
     // if (i % N == i / N) {
     //   AVec[i] = 1.0;
@@ -150,13 +150,13 @@ int main(int argc, const char *argv[]) {
     //   AVec[i] = 0.0;
     // }
 
-    AVec[i] = (i / 8) % 1000;
+    // AVec[i] = (i / 8) % 1000;
   }
 
   std::vector<float> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    // BVec[i] = (float)((rand() % 16));
+    BVec[i] = (float)((rand() % 16));
     // Diagonal:
     // if (i % N == i / N) {
     //   BVec[i] = 1.0;
@@ -164,7 +164,7 @@ int main(int argc, const char *argv[]) {
     //   BVec[i] = 0.0;
     // }
 
-    BVec[i] = i % 8;
+    // BVec[i] = i % 8;
   }
 
   auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
@@ -173,47 +173,15 @@ int main(int argc, const char *argv[]) {
   auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
   std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp);
 
-  printf("AVecBfp size: %zu\n", AVecBfp.size());
-  auto temp = shuffleMatrixForBfp16ebs8(256, 256, AVecBfp);
-  auto testAnew = bfp16ebs8ToFloat(A_VOLUME, temp.data());
-
-  // std::vector<uint8_t> AVecBfpShuffledAli(A_VOLUME);
-  // for(int j4 = 0; j4 < 4; j4++){ // size_4 = 256/64 = 4, stride_4 = 64*(256+32) = 18432
-  //   for(int j3 = 0; j3 < 4; j3++){ // size_3 = 256/64 = 4, stride_3 = 64+8 = 72
-  //     // This is one block of 64x64
-  //     int temp_indx = j4*18432 + j3*72;
-  //     for (int i4 = 0; i4 < 8; i4++) { // size_4 = m/r = 8, stride_4 = r*(k+8) = 576 -> 2304 works with j4*18432
-  //       for (int i3 = 0; i3 < 8; i3++) { // size_3 = k/s = 8, stride_3 = s+1 = 9 -> 9 works with j3*72
-  //         for (int i2 = 0; i2 < 8; i2++) { // size_2 = r = 8, stride_2 = k+8 = 72 -> 288
-  //           for (int i1 = 0; i1 < 9; i1++) { // size_1 = s+1 = 9, stride_1 = 1
-  //             AVecBfpShuffledAli[temp_indx] = AVecBfp[i4*2304 + i3*9 + i2*288 + i1 + j4*18432 + j3*72];
-  //             temp_indx++;
-  //             if(temp_indx % 72 == 0){
-  //               temp_indx += 216;
-  //             }
-  //           }
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
-
-  // auto aliTest = bfp16ebs8ToFloat(A_VOLUME, AVecBfpShuffledAli.data());
-
-  // std::ofstream outfile1("ali_matrix.txt");
-  // matmul_common::print_matrix(aliTest, K, M, K, outfile1, " ", " ... ", 0);
-
-  // std::ofstream outfile2("testAnew_matrix.txt");
-  // matmul_common::print_matrix(testAnew, K, M, K, outfile2, " ", " ... ", 0);
+  // std::ofstream outfile1("inputA.txt");
+  // // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
+  // printBfp16ebs8Array(A_VOLUME, AVecBfpShuffled, 16, 16, outfile1);
   // outfile1.close();
-  // outfile2.close();
 
-  // printf("AVec: \n");
-  // matmul_common::print_matrix(AVec, 128, 128, 73, std::cout, " ", " ... ", 0);
-  // printBfp16ebs8Array(A_VOLUME, AVecBfp);
-  // printf("AVecBfpShuffled: \n");
-  // matmul_common::print_matrix(testAnew, 128, 128, 73, std::cout, " ", " ... ", 0);
-  // printBfp16ebs8Array(A_VOLUME, temp);
+  // std::ofstream outfile2("inputB.txt");
+  // // matmul_common::print_matrix(BVecBfpShuffled, K, N, K, outfile2, " ", " ... ", 0);
+  // printBfp16ebs8Array(B_VOLUME, BVecBfpShuffled, 16, 16, outfile2);
+  // outfile2.close();
 
   // ------------------------------------------------------
   // Write data into buffers
@@ -225,7 +193,6 @@ int main(int argc, const char *argv[]) {
 
   // Initialize outputs; bufOut is results matrix
   char *bufOut = bo_out.map<char *>();
-  std::vector<uint8_t> CVecBfp(C_VOLUME);
 
   // Instruction buffer for DMA configuration
   void *bufInstr = bo_instr.map<void *>();
@@ -250,12 +217,12 @@ int main(int argc, const char *argv[]) {
   for (unsigned iter = 0; iter < num_iter; iter++) {
     auto start = std::chrono::high_resolution_clock::now();
     unsigned int opcode = 3;
-    // auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out);
-    // ert_cmd_state r = run.wait();
-    // if (r != ERT_CMD_STATE_COMPLETED) {
-    //   std::cout << "Kernel did not complete. Returned status: " << r << "\n";
-    //   return 1;
-    // }
+    auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out);
+    ert_cmd_state r = run.wait();
+    if (r != ERT_CMD_STATE_COMPLETED) {
+      std::cout << "Kernel did not complete. Returned status: " << r << "\n";
+      return 1;
+    }
     auto stop = std::chrono::high_resolution_clock::now();
     bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
@@ -268,6 +235,7 @@ int main(int argc, const char *argv[]) {
     // Check output
     // ------------------------------------------------------
     if (do_verify) {
+      std::vector<uint8_t> CVecBfp(C_VOLUME);
       memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
       std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, CVecBfp, true);
@@ -280,6 +248,10 @@ int main(int argc, const char *argv[]) {
       auto vstart = std::chrono::system_clock::now();
       errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, true);
       auto vstop = std::chrono::system_clock::now();
+
+      // std::ofstream outfile("output.txt");
+      // matmul_common::print_matrix(CVec, N, M, N, outfile, " ", " ... ", 0);
+      // outfile.close();
 
       float vtime = std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart).count();
       if (verbosity >= 1) {

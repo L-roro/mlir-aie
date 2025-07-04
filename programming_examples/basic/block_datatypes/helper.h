@@ -41,7 +41,8 @@ inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp, doubl
 // The return array is structured as follows:
 // 1. The first byte is the shared exponent (max exponent of the block).
 // 2. The next *block* bytes are the quantized values.
-std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0, int verbose = 0) {
+std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0,
+                                  int verbose = 0) {
   std::vector<uint8_t> res(size * 1.125);
 
   int mbits = 7;
@@ -216,11 +217,13 @@ inline std::vector<float> bfp16ebs8ToFloat(int size, uint8_t *array, int verbose
 // Width and height are expected to be the number of scalar elements in the matrix
 // This function rearranges the 8x8 subtiles into rows so that a single subtile is contiguous in
 // memory within each tile.
-inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t height, std::vector<uint8_t> bfpMatrix,
+inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t height,
+                                                      std::vector<uint8_t> bfpMatrix,
                                                       bool unshuffle = false) {
   assert(width % 64 == 0 && "Matrix width must be divisible by tile dimension");
   assert(width % 64 == 0 && "Matrix height must be divisible by tile dimension");
-  assert(bfpMatrix.size() == (size_t)width * height * 1.125 && "Matrix size must be width*height*1.125");
+  assert(bfpMatrix.size() == (size_t)width * height * 1.125 &&
+         "Matrix size must be width*height*1.125");
 
   width = width * 1.125;
   std::vector<uint8_t> res(width * height);
@@ -231,9 +234,11 @@ inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t heigh
   size_t subtileWidth = 8 * 1.125;
   size_t subtileHeight = 8;
 
-  // The main idea is that inputGlobal X and Y are traversing the input matrix in the order we want the elements to be
-  // accessed by the core, while outputGlobal X and Y are traversing the tiles in the way they are going to be sent to the accelerator.
-  // Essentially, outputGlobal X and Y are just traversing the tiles themselves as if they were contiguous and then going to the next tile.
+  // The main idea is that inputGlobal X and Y are traversing the input matrix in the order we want
+  // the elements to be accessed by the core, while outputGlobal X and Y are traversing the tiles in
+  // the way they are going to be sent to the accelerator. Essentially, outputGlobal X and Y are
+  // just traversing the tiles themselves as if they were contiguous and then going to the next
+  // tile.
 
   // Iterate over the tiles in the matrix
   for (size_t tileStartY = 0; tileStartY < height; tileStartY += tileHeight) {
@@ -256,9 +261,7 @@ inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t heigh
               size_t outputIndex = outputGlobalY * width + outputGlobalX;
 
               if (!unshuffle) {
-                // printf("bfpMatrix[index] = %d\n", bfpMatrix[index]);
                 res[outputIndex] = bfpMatrix[inputIndex];
-                // res[countingIndex] = index;
               } else {
                 res[inputIndex] = bfpMatrix[outputIndex];
               }
@@ -273,25 +276,25 @@ inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t heigh
   return res;
 }
 
-// Pretty print to std::cout a bfp16ebs8 array
+// Pretty print to ostream a bfp16ebs8 array
 inline void printBfp16ebs8Array(int arraySize, std::vector<uint8_t> array, int blocksPerLine = 4,
-                                int blocksBeforeEmptyLine = 8, int width = 3,
-                                const std::string &blockSeparatorStart = " | B",
+                                int blocksBeforeEmptyLine = 8, std::ostream &ostream = std::cout,
+                                int width = 3, const std::string &blockSeparatorStart = " | B",
                                 const std::string &blockSeparatorEnd = " - ") {
   for (int i = 0; i < arraySize; i++) {
     if (i % (blocksPerLine * 9) == 0) {
-      std::cout << "\n";
+      ostream << "\n";
       if (i % (blocksBeforeEmptyLine * 9) == 0) {
-        std::cout << "\n";
+        ostream << "\n";
       }
     }
 
     if (i % 9 == 0) {
-      std::cout << blockSeparatorStart << std::setw(width) << i / 9 << " - ";
+      ostream << blockSeparatorStart << std::setw(width) << i / 9 << " - ";
     }
 
-    std::cout << std::setw(4) << int(array[i]);
+    ostream << std::setw(4) << int(array[i]);
   }
 
-  std::cout << std::endl;
+  ostream << std::endl;
 }

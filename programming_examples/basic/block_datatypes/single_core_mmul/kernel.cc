@@ -94,15 +94,23 @@ extern "C" {
 void matmul_testing_kernel(bfp16ebs8 *__restrict pA, bfp16ebs8 *__restrict pB,
                            bfp16ebs8 *__restrict pC) {
 
-  // matmul_vectorized_bfp16<8, 8, 8, 8, 8, 8>(pA, pB, pC);
+  matmul_vectorized_bfp16<8, 8, 8, 8, 8, 8>(pA, pB, pC);
   // aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pA_in(pA);
   // aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB_in(pB);
   // aie::block_vector_output_buffer_stream<bfp16ebs8, 64> pC_out(pC);
 
-  // pC_out.push(pA_in.pop());
+  // aie::accum<accfloat, 64> acc(aie::broadcast<float, 64>(1));
+  // pC_out.push(acc.template to_vector<bfp16ebs8>());
+
+  // int8_t *p = (int8_t *)pC;
+  // int8_t *pAt = (int8_t *)pA;
+  // for (int i = 0; i < 64 * 64 * 1.125; i++) {
+  //   p[i] = pAt[i];
+  //   p[i] = i / 9;
+  // }
 }
 
 void zero_kernel(bfp16ebs8 *__restrict cOut) { 
-  // zero_vectorized_v64bfp16ebs8<64, 64>(cOut); 
+  zero_vectorized_v64bfp16ebs8<64, 64>(cOut); 
 }
 }

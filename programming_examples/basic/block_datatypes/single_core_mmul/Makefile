@@ -38,7 +38,7 @@ insts_target?=build/insts_${target_suffix}.txt
 aie_py_src?=${targetname}.py
 
 runargs?=-v 2 --warmup 1 --iters 1
-aieargs+=-M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out}
+aieargs+=-M $M -K $K -N $N
 
 use_chess?=0
 
@@ -55,6 +55,10 @@ KERNEL_CFLAGS=${PEANOWRAP2P_FLAGS}
 ifeq (${use_chess}, 1)
 KERNEL_CC=xchesscc_wrapper
 KERNEL_CFLAGS=${CHESSCCWRAP2P_FLAGS}
+endif
+
+ifeq (${use_placed}, 1)
+aie_py_src=${targetname}_placed.py
 endif
 
 # ##########################################################################

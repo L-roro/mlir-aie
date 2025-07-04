@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc. or its affiliates
+import argparse
 import numpy as np
 
 from aie.dialects.aiex import v8bfp16ebs8
@@ -19,14 +20,22 @@ def ceildiv(a, b):
     return (a + b - 1) // b
 
 
-def my_matmul():
-    M = 128
-    K = 128
-    N = 128
-    m = 64
-    k = 64
-    n = 64
+def main():
+    argparser = argparse.ArgumentParser(
+        prog="AIE Matrix Multiplication MLIR Design (Single Core) with bfp16ebs8 input/output",
+        description="Emits MLIR code for a matrix multiplication design of the given input size. Only supported in NPU2 devices.",
+    )
+    argparser.add_argument("-M", type=int, default=128)
+    argparser.add_argument("-K", type=int, default=128)
+    argparser.add_argument("-N", type=int, default=128)
+    argparser.add_argument("-m", type=int, default=64)
+    argparser.add_argument("-k", type=int, default=64)
+    argparser.add_argument("-n", type=int, default=64)
+    args = argparser.parse_args()
+    print(my_matmul(args.M, args.K, args.N, args.m, args.k, args.n))
 
+
+def my_matmul(M, K, N, m, k, n):
     M_div_m = M // m
     K_div_k = K // k
     N_div_n = N // n
@@ -79,20 +88,15 @@ def my_matmul():
 
     rows_per_block = 4
 
-    # Define tensor access patterns for inputs/outputs
     A_tiles = TensorTiler2D.group_tiler(
         (M, K // 8), (m, k // 8), (1, K_div_k), pattern_repeat=N_div_n
     )
     b_tap = TensorTiler2D.group_tiler((K, N // 8), (k, n // 8), (K_div_k, N_div_n))[0]
 
-    C_tiles = TensorTiler2D.group_tiler((M, N // 8), (m, n // 8), (rows_per_block // 2, N_div_n))
+    C_tiles = TensorTiler2D.group_tiler(
+        (M, N // 8), (m, n // 8), (rows_per_block // 2, N_div_n)
+    )
     c_index = 0
-
-    # print(f"Tap A 0: {A_tiles[0]}")
-    # print(f"Tap A 1: {A_tiles[1]}")
-    # print(f"Tap B: {b_tap}")
-    # print(f"Tap C 0: {C_tiles[0]}")
-    # print(f"Tap C 1: {C_tiles[1]}")
 
     rt = Runtime()
     with rt.sequence(A_ty, B_ty, C_ty) as (A, B, C):
@@ -139,4 +143,4 @@ def my_matmul():
     return module
 
 
-print(my_matmul())
+main()
