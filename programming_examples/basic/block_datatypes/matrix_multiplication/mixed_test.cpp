@@ -197,8 +197,6 @@ int main(int argc, const char *argv[]) {
   // ------------------------------------------------------
   std::bfloat16_t *bufA = bo_a.map<std::bfloat16_t *>();
   uint8_t *bufB = bo_b.map<uint8_t *>();
-  std::cout << "Number of bytes in A buffer: " << AVec.size() * sizeof(std::bfloat16_t)
-            << std::endl;
   memcpy(bufA, AVec.data(), AVec.size() * sizeof(std::bfloat16_t));
   memcpy(bufB, BVecBfpShuffled.data(), B_VOLUME);
 
