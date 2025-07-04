@@ -8,17 +8,12 @@
 # 
 ##===----------------------------------------------------------------------===##
 
-include ${current_dir}../../../makefile-common
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-matrix_multiplication_dir := ${srcdir}/../../matrix_multiplication
 subdir=${srcdir}
-targetname=whole_array
+targetname=single_core
 devicename=npu2
 kernelsrc:= $(firstword $(wildcard ../*.cc))
 hostsrc := $(firstword $(wildcard ../*.cpp))
-
-n_aie_cols?=4
-aieargs+=--n-aie-cols ${n_aie_cols}
 
 # M, K, N: final GEMM dimensions
 M?=512
@@ -30,4 +25,4 @@ m?=64
 k?=64
 n?=64
 
-include ${srcdir}/../mmul_makefile_common
+include ${srcdir}/../makefile_common

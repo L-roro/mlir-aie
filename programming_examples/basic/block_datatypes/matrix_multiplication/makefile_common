@@ -1,4 +1,4 @@
-##===- mmul_makefile_common -----------------------------------------------===##
+##===- makefile_common ----------------------------------------------------===##
 # 
 # This file licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
@@ -7,6 +7,9 @@
 # Copyright (C) 2025, Advanced Micro Devices, Inc.
 # 
 ##===----------------------------------------------------------------------===##
+include ${srcdir}/../../../../makefile-common
+
+matrix_multiplication_dir := ${srcdir}/../../../matrix_multiplication
 
 kernels=mm_${m}x${k}x${n}
 aieargs+=-m $m -k $k -n $n
@@ -63,7 +66,7 @@ ${xclbin_target}: ${mlir_target} ${kernels:%=build/%.o}
 				${aiecc_peano_flags} \
 				--aie-generate-npu-insts --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
 
-${targetname}.exe: ${srcdir}/${hostsrc} ${matrix_multiplication_dir}/common.h ${srcdir}/../helper.h
+${targetname}.exe: ${srcdir}/${hostsrc} ${matrix_multiplication_dir}/common.h ${srcdir}/../../helper.h
 	rm -rf _build
 	mkdir -p _build
 	cd _build && ${powershell} cmake -E env CXXFLAGS="-std=c++23 -ggdb -DDTYPE_IN=${dtype_in_cpp} -DDTYPE_OUT=${dtype_out_cpp} -DDTYPE_ACC=${dtype_acc_cpp}" \
