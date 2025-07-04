@@ -212,30 +212,12 @@ inline std::vector<float> bfp16ebs8ToFloat(int size, uint8_t *array, int verbose
   return res;
 }
 
-// Shuffle a 64x64 matrix stored in a 1D array.
-// This function rearranges the 8x8 subtiles into rows so that a single tile is contiguous in
-// memory. The arrays are expected to be of size 64x64x1.125=4608 bytes.
-inline void shuffle64x64Matrix(uint8_t *matrix, uint8_t *result, bool unshuffle = 0) {
-  int idx = 0;
-  for (int i4 = 0; i4 < 8; i4++) {       // size_4 = m/r = 8, stride_4 = r*(k+8) = 576
-    for (int i3 = 0; i3 < 8; i3++) {     // size_3 = k/s = 8, stride_3 = s+1 = 9
-      for (int i2 = 0; i2 < 8; i2++) {   // size_2 = r = 8, stride_2 = k+8 = 72
-        for (int i1 = 0; i1 < 9; i1++) { // size_1 = s+1 = 9, stride_1 = 1
-          if (!unshuffle)
-            result[idx] = matrix[i4 * 576 + i3 * 9 + i2 * 72 + i1];
-          else
-            result[i4 * 576 + i3 * 9 + i2 * 72 + i1] = matrix[idx];
-          idx++;
-        }
-      }
-    }
-  }
-}
-
 // Shuffle tiles of 64x64 elements for the matrix
 // Width and height are expected to be the number of scalar elements in the matrix
+// This function rearranges the 8x8 subtiles into rows so that a single subtile is contiguous in
+// memory within each tile.
 inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t height, std::vector<uint8_t> bfpMatrix,
-                                                      bool unshuffle = 0) {
+                                                      bool unshuffle = false) {
   assert(width % 64 == 0 && "Matrix width must be divisible by tile dimension");
   assert(width % 64 == 0 && "Matrix height must be divisible by tile dimension");
   assert(bfpMatrix.size() == (size_t)width * height * 1.125 && "Matrix size must be width*height*1.125");

@@ -170,14 +170,10 @@ int main(int argc, const char *argv[]) {
   }
 
   auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
-
-  std::vector<uint8_t> AVecBfpShuffled(A_VOLUME);
-  shuffle64x64Matrix(AVecBfp.data(), AVecBfpShuffled.data());
+  auto AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, AVecBfp, false);
 
   auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
-
-  std::vector<uint8_t> BVecBfpShuffled(B_VOLUME);
-  shuffle64x64Matrix(BVecBfp.data(), BVecBfpShuffled.data());
+  auto BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp, false);
 
   // ------------------------------------------------------
   // Write data into buffers
@@ -234,8 +230,7 @@ int main(int argc, const char *argv[]) {
     if (do_verify) {
       memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
-      std::vector<uint8_t> CVecBfpShuffled(C_VOLUME);
-      shuffle64x64Matrix(CVecBfp.data(), CVecBfpShuffled.data(), true);
+      std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, CVecBfp, true);
 
       auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfpShuffled.data(), 0);
 
