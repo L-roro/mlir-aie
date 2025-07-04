@@ -41,7 +41,7 @@ inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp, doubl
 // The return array is structured as follows:
 // 1. The first byte is the shared exponent (max exponent of the block).
 // 2. The next *block* bytes are the quantized values.
-std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0,
+inline std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0,
                                   int verbose = 0) {
   std::vector<uint8_t> res(size * 1.125);
 

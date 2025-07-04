@@ -2,7 +2,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# (c) Copyright 2023 Advanced Micro Devices, Inc.
+# (c) Copyright 2025 Advanced Micro Devices, Inc.
 
 # parameters
 # -DXRT_INC_DIR: Full path to src/runtime_src/core/include in XRT cloned repo
@@ -42,17 +42,17 @@ endif ()
 project(${ProjectName})
 
 add_executable(${currentTarget}
-    ${subdir}/test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../runtime_lib/test_lib/test_utils.cpp
+    ${subdir}/../mmul_bfp_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime_lib/test_lib/test_utils.cpp
 )
 
 target_compile_definitions(${currentTarget} PUBLIC DISABLE_ABI_CHECK=1)
 
 target_include_directories (${currentTarget} PUBLIC
     ${XRT_INC_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../runtime_lib/test_lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../runtime_lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../matrix_multiplication
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime_lib/test_lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime_lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/../matrix_multiplication
 )
 
 target_link_directories(${currentTarget} PUBLIC

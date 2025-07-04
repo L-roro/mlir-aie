@@ -28,7 +28,7 @@ using bfloat16_t = double;
 } // namespace std
 #endif
 
-#include "../helper.h"
+#include "helper.h"
 #include "common.h"
 
 #define XSTR(X) STR(X)
@@ -99,14 +99,13 @@ int main(int argc, const char *argv[]) {
 
   // Get the kernel from the xclbin
   auto xkernels = xclbin.get_kernels();
-  auto xkernel =
-      *std::find_if(xkernels.begin(), xkernels.end(), [Node, verbosity](xrt::xclbin::kernel &k) {
-        auto name = k.get_name();
-        if (verbosity >= 1) {
-          std::cout << "Name: " << name << std::endl;
-        }
-        return name.rfind(Node, 0) == 0;
-      });
+  auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(), [Node, verbosity](xrt::xclbin::kernel &k) {
+    auto name = k.get_name();
+    if (verbosity >= 1) {
+      std::cout << "Name: " << name << std::endl;
+    }
+    return name.rfind(Node, 0) == 0;
+  });
   auto kernelName = xkernel.get_name();
 
   if (verbosity >= 1)
@@ -128,8 +127,7 @@ int main(int argc, const char *argv[]) {
   // Initialize input/output buffer sizes and sync them
   // ------------------------------------------------------
 
-  auto bo_instr =
-      xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+  auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
   auto bo_a = xrt::bo(device, A_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
   auto bo_b = xrt::bo(device, B_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
   auto bo_out = xrt::bo(device, C_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
@@ -152,7 +150,7 @@ int main(int argc, const char *argv[]) {
     //   AVec[i] = 0.0;
     // }
 
-    // AVec[i] = i / 8;
+    // AVec[i] = (i / 8) % 1000;
   }
 
   std::vector<float> BVec(B_SIZE);
@@ -166,14 +164,24 @@ int main(int argc, const char *argv[]) {
     //   BVec[i] = 0.0;
     // }
 
-    // BVec[i] = i / 8;
+    // BVec[i] = i % 8;
   }
 
   auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
-  auto AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, AVecBfp, false);
+  std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, AVecBfp);
 
   auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
-  auto BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp, false);
+  std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp);
+
+  // std::ofstream outfile1("inputA.txt");
+  // // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
+  // printBfp16ebs8Array(A_VOLUME, AVecBfpShuffled, 16, 16, outfile1);
+  // outfile1.close();
+
+  // std::ofstream outfile2("inputB.txt");
+  // // matmul_common::print_matrix(BVecBfpShuffled, K, N, K, outfile2, " ", " ... ", 0);
+  // printBfp16ebs8Array(B_VOLUME, BVecBfpShuffled, 16, 16, outfile2);
+  // outfile2.close();
 
   // ------------------------------------------------------
   // Write data into buffers
@@ -185,7 +193,6 @@ int main(int argc, const char *argv[]) {
 
   // Initialize outputs; bufOut is results matrix
   char *bufOut = bo_out.map<char *>();
-  std::vector<uint8_t> CVecBfp(C_VOLUME);
 
   // Instruction buffer for DMA configuration
   void *bufInstr = bo_instr.map<void *>();
@@ -228,6 +235,7 @@ int main(int argc, const char *argv[]) {
     // Check output
     // ------------------------------------------------------
     if (do_verify) {
+      std::vector<uint8_t> CVecBfp(C_VOLUME);
       memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
       std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, CVecBfp, true);
@@ -238,9 +246,12 @@ int main(int argc, const char *argv[]) {
         std::cout << "Verifying against reference matmul ..." << std::endl;
       }
       auto vstart = std::chrono::system_clock::now();
-      errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity,
-                                                          abs_tol, rel_tol, true);
+      errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, true);
       auto vstop = std::chrono::system_clock::now();
+
+      // std::ofstream outfile("output.txt");
+      // matmul_common::print_matrix(CVec, N, M, N, outfile, " ", " ... ", 0);
+      // outfile.close();
 
       float vtime = std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart).count();
       if (verbosity >= 1) {
@@ -261,8 +272,7 @@ int main(int argc, const char *argv[]) {
   // ------------------------------------------------------
   // Output results
   // ------------------------------------------------------
-  std::cout << std::endl
-            << "Avg NPU matmul time: " << npu_time_total / n_iterations << "us." << std::endl;
+  std::cout << std::endl << "Avg NPU matmul time: " << npu_time_total / n_iterations << "us." << std::endl;
   std::cout << "Avg NPU gflops: " << macs / (1000 * npu_time_total / n_iterations) << std::endl;
 
   std::cout << std::endl << "Min NPU matmul time: " << npu_time_min << "us." << std::endl;

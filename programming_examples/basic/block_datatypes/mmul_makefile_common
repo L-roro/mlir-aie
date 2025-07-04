@@ -1,4 +1,4 @@
-##===- Makefile -----------------------------------------------------------===##
+##===- mmul_makefile_common -----------------------------------------------===##
 # 
 # This file licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
@@ -7,23 +7,6 @@
 # Copyright (C) 2025, Advanced Micro Devices, Inc.
 # 
 ##===----------------------------------------------------------------------===##
-
-include ${current_dir}../../../makefile-common
-srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-matrix_multiplication_dir := ${srcdir}/../../matrix_multiplication
-subdir=${srcdir}
-targetname=whole_array
-devicename=npu2
-
-# M, K, N: final GEMM dimensions
-M?=512
-K?=512
-N?=512
-
-# m, k, n: single AIE core GEMM dimensions
-m?=64
-k?=64
-n?=64
 
 b_col_maj?=1
 
@@ -68,7 +51,7 @@ endif
 .PHONY: all
 all: ${xclbin_target} ${targetname}.exe
 
-build/mm_${m}x${k}x${n}.o: ${srcdir}/kernel.cc
+build/mm_${m}x${k}x${n}.o: ${srcdir}/../mm.cc
 	mkdir -p ${@D}
 	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o ${@F}
 
@@ -82,11 +65,11 @@ ${xclbin_target}: ${mlir_target} ${kernels:%=build/%.o}
 				${aiecc_peano_flags} \
 				--aie-generate-npu-insts --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
 
-${targetname}.exe: ${srcdir}/test.cpp ${matrix_multiplication_dir}/common.h ${srcdir}/../helper.h
+${targetname}.exe: ${srcdir}/../mmul_bfp_test.cpp ${matrix_multiplication_dir}/common.h ${srcdir}/../helper.h
 	rm -rf _build
 	mkdir -p _build
 	cd _build && ${powershell} cmake -E env CXXFLAGS="-std=c++23 -ggdb -DDTYPE_IN=${dtype_in_cpp} -DDTYPE_OUT=${dtype_out_cpp} -DDTYPE_ACC=${dtype_acc_cpp}" \
-		cmake `${getwslpath} ${srcdir}` -D CMAKE_C_COMPILER=gcc-13 -D CMAKE_CXX_COMPILER=g++-13 -DTARGET_NAME=${targetname} -Dsubdir=${subdir}
+		cmake `${getwslpath} ${srcdir}/..` -D CMAKE_C_COMPILER=gcc-13 -D CMAKE_CXX_COMPILER=g++-13 -DTARGET_NAME=${targetname} -Dsubdir=${subdir}
 	cd _build && ${powershell} cmake --build . --config Release
 ifeq "${powershell}" "powershell.exe"
 	cp _build/${targetname}.exe $@
