@@ -13,7 +13,7 @@ subdir=${srcdir}
 targetname=single_core
 devicename=npu2
 kernelsrc:= $(firstword $(wildcard ../*.cc))
-hostsrc := $(firstword $(wildcard ../*.cpp))
+hostsrc := $(firstword $(wildcard ../*bfp_test.cpp))
 
 # M, K, N: final GEMM dimensions
 M?=512

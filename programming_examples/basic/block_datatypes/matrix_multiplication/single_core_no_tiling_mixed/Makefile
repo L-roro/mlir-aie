@@ -13,12 +13,12 @@ subdir=${srcdir}
 targetname=single_core
 devicename=npu2
 kernelsrc:= $(firstword $(wildcard ../*.cc))
-hostsrc := $(firstword $(wildcard *.cpp))
+hostsrc := $(firstword $(wildcard ../*mixed_test.cpp))
 
 # M, K, N: final GEMM dimensions
-M?=512
-K?=512
-N?=512
+M?=64
+K?=64
+N?=64
 
 # m, k, n: single AIE core GEMM dimensions
 m?=64

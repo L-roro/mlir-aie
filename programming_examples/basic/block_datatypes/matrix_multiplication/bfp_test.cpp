@@ -1,4 +1,4 @@
-//===- test.cpp -------------------------------------------------*- C++ -*-===//
+//===- bfp_test.cpp ---------------------------------------------*- C++ -*-===//
 //
 // This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -28,11 +28,14 @@ using bfloat16_t = double;
 } // namespace std
 #endif
 
-#include "../../helper.h"
+#include "../helper.h"
 #include "common.h"
 
 #define XSTR(X) STR(X)
 #define STR(X) #X
+
+constexpr long long verify_stochastic_threshold = 1024 * 1024;
+constexpr int verify_stochastic_n_samples = 1000;
 
 // Verification tolerance
 // See "Note on Numerical Tolerances" in README.md
@@ -63,6 +66,7 @@ int main(int argc, const char *argv[]) {
   int M = vm["M"].as<int>();
   int K = vm["K"].as<int>();
   int N = vm["N"].as<int>();
+  bool do_verify_stochastic = (long long)M * N > verify_stochastic_threshold;
 
   if (verbosity >= 1) {
     std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
@@ -141,10 +145,10 @@ int main(int argc, const char *argv[]) {
     std::cout << "Writing data into buffer objects.\n";
   }
 
-  std::vector<std::bfloat16_t> AVec(A_SIZE);
+  std::vector<float> AVec(A_SIZE);
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    AVec[i] = (std::bfloat16_t)((rand() % 16));
+    AVec[i] = (float)((rand() % 16));
     // AVec[i] = i;
     // if (i % N == i / N) {
     //   AVec[i] = 1.0;
@@ -155,10 +159,10 @@ int main(int argc, const char *argv[]) {
     // AVec[i] = (i / 8) % 1000;
   }
 
-  std::vector<std::bfloat16_t> BVec(B_SIZE);
+  std::vector<float> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    BVec[i] = (std::bfloat16_t)((rand() % 16));
+    BVec[i] = (float)((rand() % 16));
     // Diagonal:
     // if (i % N == i / N) {
     //   BVec[i] = 1.0;
@@ -169,24 +173,19 @@ int main(int argc, const char *argv[]) {
     // BVec[i] = i % 8;
   }
 
-  // This is a quick conversion to avoid having to create a custom function for bf16 for now
-  std::vector<float> BVecFloat(B_SIZE);
-  for (int i = 0; i < B_SIZE; i++) {
-    BVecFloat[i] = (float)BVec[i];
-  }
+  auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
+  std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, AVecBfp);
 
-  auto BVecBfp = floatToBfp16(8, B_SIZE, BVecFloat.data(), 0, 0);
+  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
   std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp);
 
   // std::ofstream outfile1("inputA.txt");
-  // std::cout << "Input A matrix:" << std::endl;
-  // matmul_common::print_matrix(AVec, K, M, K, std::cout, " ", " ... ", 0);
+  // // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
   // printBfp16ebs8Array(A_VOLUME, AVecBfpShuffled, 16, 16, outfile1);
   // outfile1.close();
 
   // std::ofstream outfile2("inputB.txt");
-  // std::cout << "Input B matrix:" << std::endl;
-  // matmul_common::print_matrix(BVec, K, N, K, std::cout, " ", " ... ", 0);
+  // // matmul_common::print_matrix(BVecBfpShuffled, K, N, K, outfile2, " ", " ... ", 0);
   // printBfp16ebs8Array(B_VOLUME, BVecBfpShuffled, 16, 16, outfile2);
   // outfile2.close();
 
@@ -195,7 +194,7 @@ int main(int argc, const char *argv[]) {
   // ------------------------------------------------------
   uint8_t *bufA = bo_a.map<uint8_t *>();
   uint8_t *bufB = bo_b.map<uint8_t *>();
-  memcpy(bufA, AVec.data(), AVec.size() * sizeof(std::bfloat16_t));
+  memcpy(bufA, AVecBfpShuffled.data(), A_VOLUME);
   memcpy(bufB, BVecBfpShuffled.data(), B_VOLUME);
 
   // Initialize outputs; bufOut is results matrix
@@ -242,15 +241,24 @@ int main(int argc, const char *argv[]) {
     // Check output
     // ------------------------------------------------------
     if (do_verify) {
-      std::vector<std::bfloat16_t> CVec(C_SIZE);
-      memcpy(CVec.data(), bufOut, CVec.size() * sizeof(std::bfloat16_t));
+      std::vector<uint8_t> CVecBfp(C_VOLUME);
+      memcpy(CVecBfp.data(), bufOut, C_VOLUME);
+
+      std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, CVecBfp, true);
+
+      auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfpShuffled.data(), 0);
 
       if (verbosity >= 1) {
         std::cout << "Verifying against reference matmul ..." << std::endl;
       }
       auto vstart = std::chrono::system_clock::now();
-      errors = matmul_common::verify<std::bfloat16_t, std::bfloat16_t, std::bfloat16_t>(M, N, K, AVec, BVec, CVec, verbosity,
-                                                          abs_tol, rel_tol, true);
+      if (do_verify_stochastic) {
+        errors = matmul_common::verify_stochastic<float, float, float>(M, N, K, AVec, BVec, CVec,
+                                                                       verify_stochastic_n_samples);
+      } else {
+        errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity,
+                                                            abs_tol, rel_tol, true);
+      }
       auto vstop = std::chrono::system_clock::now();
 
       // std::ofstream outfile("output.txt");
@@ -290,10 +298,11 @@ int main(int argc, const char *argv[]) {
     std::cout << "\nPASS!\n\n";
     return 0;
   }
-
   std::cout << "\nError count: " << errors;
+  if (do_verify_stochastic) {
+    std::cout << " (out of " << verify_stochastic_n_samples << " random samples)";
+  }
   std::cout << "\n\n";
-
   std::cout << "\nFailed.\n\n";
   return 1;
 }

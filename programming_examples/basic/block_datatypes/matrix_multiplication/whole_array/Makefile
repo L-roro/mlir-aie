@@ -13,7 +13,7 @@ subdir=${srcdir}
 targetname=whole_array
 devicename=npu2
 kernelsrc:= $(firstword $(wildcard ../*.cc))
-hostsrc := $(firstword $(wildcard ../*.cpp))
+hostsrc := $(firstword $(wildcard ../*bfp_test.cpp))
 
 n_aie_cols?=4
 aieargs+=--n-aie-cols ${n_aie_cols}
