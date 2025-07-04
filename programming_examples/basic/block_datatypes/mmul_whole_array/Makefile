@@ -14,6 +14,11 @@ matrix_multiplication_dir := ${srcdir}/../../matrix_multiplication
 subdir=${srcdir}
 targetname=whole_array
 devicename=npu2
+kernelsrc:= $(firstword $(wildcard ../*.cc))
+hostsrc := $(firstword $(wildcard ../*.cpp))
+
+n_aie_cols?=4
+aieargs+=--n-aie-cols ${n_aie_cols}
 
 # M, K, N: final GEMM dimensions
 M?=512

@@ -105,7 +105,7 @@ def my_matmul(M, K, N, m, k, n, n_aie_cols):
     # AIE Core Function declarations
     zero_kernel = Kernel(f"zero_kernel", f"mm_{m}x{k}x{n}.o", [C_l1_ty])
     matmul_kernel = Kernel(
-        "matmul_testing_kernel",
+        "matmul_vectorized_bfp16",
         f"mm_{m}x{k}x{n}.o",
         [A_l1_ty, B_l1_ty, C_l1_ty],
     )

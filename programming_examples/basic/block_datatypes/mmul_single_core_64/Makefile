@@ -14,6 +14,8 @@ matrix_multiplication_dir := ${srcdir}/../../matrix_multiplication
 subdir=${srcdir}
 targetname=single_core
 devicename=npu2
+kernelsrc:= $(firstword $(wildcard ../*.cc))
+hostsrc := $(firstword $(wildcard ../*.cpp))
 
 # M, K, N: final GEMM dimensions
 M?=64

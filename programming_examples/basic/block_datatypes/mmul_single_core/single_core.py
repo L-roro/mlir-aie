@@ -51,7 +51,7 @@ def my_matmul(M, K, N, m, k, n):
 
     zero_kernel = Kernel(f"zero_kernel", f"mm_{m}x{k}x{n}.o", [c_ty])
     matmul_kernel = Kernel(
-        "matmul_testing_kernel",
+        "matmul_vectorized_bfp16",
         f"mm_{m}x{k}x{n}.o",
         [a_ty, b_ty, c_ty],
     )

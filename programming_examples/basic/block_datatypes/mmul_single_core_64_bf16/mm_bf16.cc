@@ -23,81 +23,11 @@ void zero_vectorized_v64bfp16ebs8(bfp16ebs8 *__restrict cOut) {
   }
 }
 
-// This kernel mirrors the one found in https://xilinx.github.io/aie_api/group__group__mmul.html
-// Go through them in parallel to understand how the bfp datatype modifies accesses to memory
-template <unsigned rowA, unsigned colA, unsigned colB, unsigned r, unsigned s, unsigned t>
-void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8 *__restrict pB,
-                                 bfp16ebs8 *__restrict pC) {
-  const unsigned sizeA = r * s;
-  const unsigned sizeB = s * t;
-  const unsigned sizeC = r * t;
-
-  for (unsigned z = 0; z < rowA; z += 2) {
-    aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC1In(pC);
-    pC1In.seek(z * colB);
-    aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC2In(pC);
-    pC2In.seek((z + 1) * colB);
-    aie::block_vector_output_buffer_stream<bfp16ebs8, 64> pC1Out(pC);
-    pC1Out.seek(z * colB);
-    aie::block_vector_output_buffer_stream<bfp16ebs8, 64> pC2Out(pC);
-    pC2Out.seek((z + 1) * colB);
-
-    for (unsigned j = 0; j < colB; j += 2) {
-      aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pA1bfp16(pA);
-      pA1bfp16.seek(z * colA);
-      aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pA2bfp16(pA);
-      pA2bfp16.seek((z + 1) * colA);
-
-      aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB1bfp16(pB);
-      pB1bfp16.seek(j);
-      aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB2bfp16(pB);
-      pB2bfp16.seek(j + 1);
-
-      aie::block_vector<bfp16ebs8, sizeA> A0 = pA1bfp16.pop();
-      aie::block_vector<bfp16ebs8, sizeA> A1 = pA2bfp16.pop();
-      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
-      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
-
-      // Note that unlike the example mentioned above, we need
-      // to use a mac to take into account results from previous kernel calls
-      // but this is completely unrelated to the block datatype.
-      aie::accum<accfloat, sizeC> accC00(pC1In.pop());
-      aie::accum<accfloat, sizeC> accC01(pC1In.pop());
-
-      aie::accum<accfloat, sizeC> accC10(pC2In.pop());
-      aie::accum<accfloat, sizeC> accC11(pC2In.pop());
-
-      accC00 = mac_8x8_8x8T(A0, B0, accC00);
-      accC01 = mac_8x8_8x8T(A0, B1, accC01);
-      accC10 = mac_8x8_8x8T(A1, B0, accC10);
-      accC11 = mac_8x8_8x8T(A1, B1, accC11);
-
-      for (unsigned i = 1; i < colA; ++i) {
-        A0 = pA1bfp16.pop();
-        A1 = pA2bfp16.pop();
-
-        B0 = pB1bfp16.pop_seek(colB - 1);
-        B1 = pB2bfp16.pop_seek(colB - 1);
-
-        accC00 = mac_8x8_8x8T(A0, B0, accC00);
-        accC01 = mac_8x8_8x8T(A0, B1, accC01);
-        accC10 = mac_8x8_8x8T(A1, B0, accC10);
-        accC11 = mac_8x8_8x8T(A1, B1, accC11);
-      }
-
-      pC1Out.push(accC00.template to_vector<bfp16ebs8>());
-      pC1Out.push(accC01.template to_vector<bfp16ebs8>());
-      pC2Out.push(accC10.template to_vector<bfp16ebs8>());
-      pC2Out.push(accC11.template to_vector<bfp16ebs8>());
-    }
-  }
-}
-
 // This kernel is a variation of the conventional matrix multiplications in the repo that uses
 // different datatypes for the A and B.
 template <unsigned rowA, unsigned colA, unsigned colB, unsigned r, unsigned s, unsigned t>
 void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16ebs8 *__restrict pB,
-                                      bfloat16 *__restrict pC) {
+                             bfloat16 *__restrict pC) {
   const unsigned sizeA = r * s;
   const unsigned sizeB = s * t;
   const unsigned sizeC = r * t;
@@ -172,14 +102,8 @@ void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16
 }
 
 extern "C" {
-void matmul_vectorized_bfp16(bfp16ebs8 *__restrict pA, bfp16ebs8 *__restrict pB,
-                             bfp16ebs8 *__restrict pC) {
-
-  matmul_vectorized_2x2_bfp16<8, 8, 8, 8, 8, 8>(pA, pB, pC);
-}
-
 void matmul_vectorized_different_datatypes(bfloat16 *__restrict pA, bfp16ebs8 *__restrict pB,
-                                           bfloat16 *__restrict pC) {
+                           bfloat16 *__restrict pC) {
 
   matmul_vectorized_2x2_bfp16_bf16<8, 8, 8, 8, 8, 8>(pA, pB, pC);
 }

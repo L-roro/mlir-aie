@@ -42,7 +42,7 @@ endif ()
 project(${ProjectName})
 
 add_executable(${currentTarget}
-    ${subdir}/../mmul_bfp_test.cpp
+    ${subdir}/${hostsrc}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime_lib/test_lib/test_utils.cpp
 )
 

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc. or its affiliates
+from ml_dtypes import bfloat16
 import numpy as np
 
 from aie.iron import Kernel, ObjectFifo, Program, Runtime, Worker
@@ -24,30 +25,36 @@ def my_matmul():
     k = 64
     n = 64
 
+    r = 8
+    s = 8
+    t = 8
+
     # Define tensor types
-    A_ty = np.ndarray[(M * K // 8,), np.dtype[v8bfp16ebs8]]
+    A_ty = np.ndarray[(M * K,), np.dtype[bfloat16]]
     B_ty = np.ndarray[(K * N // 8,), np.dtype[v8bfp16ebs8]]
-    C_ty = np.ndarray[(M * N // 8,), np.dtype[v8bfp16ebs8]]
-    a_ty = np.ndarray[(m * k // 8,), np.dtype[v8bfp16ebs8]]
+    C_ty = np.ndarray[(M * N,), np.dtype[bfloat16]]
+    a_ty = np.ndarray[(m * k,), np.dtype[bfloat16]]
     b_ty = np.ndarray[(k * n // 8,), np.dtype[v8bfp16ebs8]]
-    c_ty = np.ndarray[(m * n // 8,), np.dtype[v8bfp16ebs8]]
+    c_ty = np.ndarray[(m * n,), np.dtype[bfloat16]]
 
     zero_kernel = Kernel(f"zero_kernel", f"mm_{m}x{k}x{n}.o", [c_ty])
     matmul_kernel = Kernel(
-        "matmul_vectorized_bfp16",
+        "matmul_vectorized_different_datatypes",
         f"mm_{m}x{k}x{n}.o",
         [a_ty, b_ty, c_ty],
     )
 
     inA = ObjectFifo(a_ty, name="inA")
-    memA = inA.cons().forward(name="memA")
+    a_dims = [(m // r, r * k), (k // s, s), (r, k), (s, 1)]
+    memA = inA.cons().forward(name="memA", dims_to_stream=a_dims)
 
     inB = ObjectFifo(b_ty, name="inB")
     b_dims = [(8, 8), (8, 64), (8, 1)]
     memB = inB.cons().forward(name="memB", dims_to_stream=b_dims)
 
     memC = ObjectFifo(c_ty, name="memC")
-    outC = memC.cons().forward(name="outC")
+    c_dims = [(m // r, r * n), (r, t), (n // t, r * t), (t, 1)]
+    outC = memC.cons().forward(name="outC", dims_to_stream=c_dims)
 
     def core_fn(of_a, of_b, of_c, zero, matmul):
         elem_out = of_c.acquire(1)
