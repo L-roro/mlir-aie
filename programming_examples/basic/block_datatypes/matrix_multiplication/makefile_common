@@ -80,7 +80,7 @@ endif
 
 run: ${targetname}.exe ${xclbin_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs}
+	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -w $m -y $k -z $n ${runargs}
 
 .PHONY: clean
 clean:

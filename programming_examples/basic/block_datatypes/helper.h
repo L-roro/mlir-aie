@@ -42,7 +42,7 @@ inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp, doubl
 // 1. The first byte is the shared exponent (max exponent of the block).
 // 2. The next *block* bytes are the quantized values.
 inline std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0,
-                                  int verbose = 0) {
+                                         int verbose = 0) {
   std::vector<uint8_t> res(size * 1.125);
 
   int mbits = 7;
@@ -217,19 +217,21 @@ inline std::vector<float> bfp16ebs8ToFloat(int size, uint8_t *array, int verbose
 // Width and height are expected to be the number of scalar elements in the matrix
 // This function rearranges the 8x8 subtiles into rows so that a single subtile is contiguous in
 // memory within each tile.
-inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t height,
+inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t matrixWidth, size_t matrixHeight,
+                                                      size_t tileWidth, size_t tileHeight,
                                                       std::vector<uint8_t> bfpMatrix,
                                                       bool unshuffle = false) {
-  assert(width % 64 == 0 && "Matrix width must be divisible by tile dimension");
-  assert(width % 64 == 0 && "Matrix height must be divisible by tile dimension");
-  assert(bfpMatrix.size() == (size_t)width * height * 1.125 &&
+  assert(matrixWidth % tileWidth == 0 && "Matrix width must be divisible by tile width");
+  assert(matrixHeight % tileHeight == 0 && "Matrix height must be divisible by tile height");
+  assert(tileWidth % 64 == 0 && "Tile width must be a multiple of 64");
+  assert(tileHeight % 8 == 0 && "Tile height must be a multiple of 8");
+  assert(bfpMatrix.size() == (size_t)matrixWidth * matrixHeight * 1.125 &&
          "Matrix size must be width*height*1.125");
 
-  width = width * 1.125;
-  std::vector<uint8_t> res(width * height);
+  matrixWidth = matrixWidth * 1.125;
+  std::vector<uint8_t> res(matrixWidth * matrixHeight);
 
-  size_t tileWidth = 64 * 1.125;
-  size_t tileHeight = 64;
+  tileWidth = tileWidth * 1.125;
 
   size_t subtileWidth = 8 * 1.125;
   size_t subtileHeight = 8;
@@ -241,8 +243,8 @@ inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t heigh
   // tile.
 
   // Iterate over the tiles in the matrix
-  for (size_t tileStartY = 0; tileStartY < height; tileStartY += tileHeight) {
-    for (size_t tileStartX = 0; tileStartX < width; tileStartX += tileWidth) {
+  for (size_t tileStartY = 0; tileStartY < matrixHeight; tileStartY += tileHeight) {
+    for (size_t tileStartX = 0; tileStartX < matrixWidth; tileStartX += tileWidth) {
 
       size_t tileCountingIndex = 0;
       // Iterate over the subtiles in each tile
@@ -254,11 +256,11 @@ inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t width, size_t heigh
             for (size_t j = 0; j < subtileWidth; ++j) {
               size_t inputGlobalX = tileStartX + subtileStartX + j;
               size_t inputGlobalY = tileStartY + subtileStartY + i;
-              size_t inputIndex = inputGlobalY * width + inputGlobalX;
+              size_t inputIndex = inputGlobalY * matrixWidth + inputGlobalX;
 
               size_t outputGlobalX = tileStartX + tileCountingIndex % tileWidth;
               size_t outputGlobalY = tileStartY + tileCountingIndex / tileWidth;
-              size_t outputIndex = outputGlobalY * width + outputGlobalX;
+              size_t outputIndex = outputGlobalY * matrixWidth + outputGlobalX;
 
               if (!unshuffle) {
                 res[outputIndex] = bfpMatrix[inputIndex];

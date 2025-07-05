@@ -51,6 +51,9 @@ int main(int argc, const char *argv[]) {
   cxxopts::Options options("Matrix Matrix Multiplication Test");
   cxxopts::ParseResult vm;
   matmul_common::add_default_options(options);
+  options.add_options()("trows,w", "Tile size m", cxxopts::value<int>()->default_value("64"))(
+      "tinner,y", "Tile size k", cxxopts::value<int>()->default_value("64"))(
+      "tcolumns,z", "Tile size n", cxxopts::value<int>()->default_value("64"));
 
   matmul_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
@@ -66,6 +69,11 @@ int main(int argc, const char *argv[]) {
   int M = vm["M"].as<int>();
   int K = vm["K"].as<int>();
   int N = vm["N"].as<int>();
+
+  int m = vm["w"].as<int>();
+  int k = vm["y"].as<int>();
+  int n = vm["z"].as<int>();
+
   bool do_verify_stochastic = (long long)M * N > verify_stochastic_threshold;
 
   if (verbosity >= 1) {
@@ -148,7 +156,7 @@ int main(int argc, const char *argv[]) {
   std::vector<float> AVec(A_SIZE);
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    AVec[i] = (float)((rand() % 16));
+    AVec[i] = (float)((rand() % 8));
     // AVec[i] = i;
     // if (i % N == i / N) {
     //   AVec[i] = 1.0;
@@ -162,7 +170,7 @@ int main(int argc, const char *argv[]) {
   std::vector<float> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    BVec[i] = (float)((rand() % 16));
+    BVec[i] = (float)((rand() % 8));
     // Diagonal:
     // if (i % N == i / N) {
     //   BVec[i] = 1.0;
@@ -174,10 +182,10 @@ int main(int argc, const char *argv[]) {
   }
 
   auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
-  std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, AVecBfp);
+  std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, k, m, AVecBfp);
 
   auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
-  std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp);
+  std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);
 
   // std::ofstream outfile1("inputA.txt");
   // // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
@@ -244,7 +252,7 @@ int main(int argc, const char *argv[]) {
       std::vector<uint8_t> CVecBfp(C_VOLUME);
       memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
-      std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, CVecBfp, true);
+      std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, n, m, CVecBfp, true);
 
       auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfpShuffled.data(), 0);
 

@@ -9,6 +9,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <aie_api/aie.hpp>
+#include <cstddef>
 
 template <int M, int N>
 void zero_vectorized_v64bfp16ebs8(bfp16ebs8 *__restrict cOut) {
@@ -36,14 +37,15 @@ void zero_vectorized(T *__restrict c) {
 
 // This kernel mirrors the one found in https://xilinx.github.io/aie_api/group__group__mmul.html
 // Go through them in parallel to understand how the bfp datatype modifies accesses to memory
-template <unsigned rowA, unsigned colA, unsigned colB, unsigned r, unsigned s, unsigned t>
+template <unsigned r, unsigned s, unsigned t>
 void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8 *__restrict pB,
-                                 bfp16ebs8 *__restrict pC) {
+                                 bfp16ebs8 *__restrict pC, unsigned rowA, unsigned colA,
+                                 unsigned colB) {
   const unsigned sizeA = r * s;
   const unsigned sizeB = s * t;
   const unsigned sizeC = r * t;
 
-  for (unsigned z = 0; z < rowA; z += 2) {
+  for (unsigned z = 0; z < rowA; z += 2) chess_loop_range(2,) {
     aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC1In(pC);
     pC1In.seek(z * colB);
     aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC2In(pC);
@@ -83,7 +85,7 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
       accC10 = mac_8x8_8x8T(A1, B0, accC10);
       accC11 = mac_8x8_8x8T(A1, B1, accC11);
 
-      for (unsigned i = 1; i < colA; ++i) {
+      for (unsigned i = 1; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(3,) {
         A0 = pA1bfp16.pop();
         A1 = pA2bfp16.pop();
 
@@ -184,9 +186,9 @@ void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16
 
 extern "C" {
 void matmul_vectorized_bfp16(bfp16ebs8 *__restrict pA, bfp16ebs8 *__restrict pB,
-                             bfp16ebs8 *__restrict pC) {
+                             bfp16ebs8 *__restrict pC, size_t m, size_t k, size_t n) {
 
-  matmul_vectorized_2x2_bfp16<8, 8, 8, 8, 8, 8>(pA, pB, pC);
+  matmul_vectorized_2x2_bfp16<8, 8, 8>(pA, pB, pC, m / 8, k / 8, n / 8);
 }
 
 void matmul_vectorized_different_datatypes(bfloat16 *__restrict pA, bfp16ebs8 *__restrict pB,

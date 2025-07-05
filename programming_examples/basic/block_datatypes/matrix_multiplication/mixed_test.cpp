@@ -48,6 +48,9 @@ int main(int argc, const char *argv[]) {
   cxxopts::Options options("Matrix Matrix Multiplication Test");
   cxxopts::ParseResult vm;
   matmul_common::add_default_options(options);
+  options.add_options()("trows,w", "Tile size m", cxxopts::value<int>()->default_value("64"))(
+      "tinner,y", "Tile size k", cxxopts::value<int>()->default_value("64"))(
+      "tcolumns,z", "Tile size n", cxxopts::value<int>()->default_value("64"));
 
   matmul_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
@@ -71,6 +74,10 @@ int main(int argc, const char *argv[]) {
   int A_SIZE = M * K;
   int B_SIZE = N * K;
   int C_SIZE = M * N;
+
+  int m = vm["w"].as<int>();
+  int k = vm["y"].as<int>();
+  int n = vm["z"].as<int>();
 
   size_t A_VOLUME = (A_SIZE * sizeof(uint8_t)) * 1.125;
   size_t B_VOLUME = (B_SIZE * sizeof(uint8_t)) * 1.125;
@@ -178,7 +185,7 @@ int main(int argc, const char *argv[]) {
   }
 
   auto BVecBfp = floatToBfp16(8, B_SIZE, BVecFloat.data(), 0, 0);
-  std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp);
+  std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);
 
   // std::ofstream outfile1("inputA.txt");
   // std::cout << "Input A matrix:" << std::endl;
