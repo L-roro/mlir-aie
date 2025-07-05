@@ -24,6 +24,8 @@ perform_sweep() {
 
     printf ",Status" >>$csv_out
 
+    printf ",shuffle_time" >>$csv_out
+
     printf "\n" >>$csv_out
 
     for M in "${Ms[@]}"; do
@@ -36,7 +38,7 @@ perform_sweep() {
                 make clean 1>>$log_out 2>&1
                 printf "${M},${K},${N}" >>$csv_out
                 for i in $(seq 1 $iterations); do
-                    make run >.tmp_run.log
+                    make run &>.tmp_run.log
                     cat .tmp_run.log $run_output >>$log_out
                     t=$(cat .tmp_run.log | sed -rn 's/^Avg NPU matmul time: ([0-9.]+)us.$/\1/p')
                     printf ",${t}" >>$csv_out
@@ -45,6 +47,8 @@ perform_sweep() {
                     else
                         printf ",FAIL" >>$csv_out
                     fi
+                    shuffle_time=$(cat .tmp_run.log | sed -rn 's/^Shuffle time: ([0-9.]+)us.$/\1/p')
+                    printf ",${shuffle_time}" >>$csv_out
                 done
                 printf "\n" >>$csv_out
             done
@@ -60,7 +64,7 @@ run_selected_hyperparameters() {
         exit 1
     fi
 
-    if [ "${11}" == 1 ]; then
+    if [ "${10}" == 1 ]; then
         compiler="chess"
     else
         compiler="peano"
@@ -89,12 +93,16 @@ cd ./whole_array
 mkdir results
 mkdir logs
 
-run_selected_hyperparameters 64 64 64 8 8 8 bfp16 bfp16 8 1
 run_selected_hyperparameters 64 64 64 8 8 8 bfp16 bfp16 4 1
 
 cd ../whole_array_mixed
 mkdir results
 mkdir logs
 
-run_selected_hyperparameters 64 64 64 8 8 8 bfp16/bf16 bf16 8 1
 run_selected_hyperparameters 64 64 64 8 8 8 bfp16/bf16 bf16 4 1
+
+cd ../whole_array
+run_selected_hyperparameters 64 64 64 8 8 8 bfp16 bfp16 8 1
+
+cd ../whole_array_mixed
+run_selected_hyperparameters 64 64 64 8 8 8 bfp16/bf16 bf16 8 1

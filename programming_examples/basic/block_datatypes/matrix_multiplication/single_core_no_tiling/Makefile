@@ -12,7 +12,7 @@ srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 subdir=${srcdir}
 targetname=single_core
 devicename=npu2
-kernelsrc:= $(firstword $(wildcard ../*.cc))
+kernelsrc:= $(firstword $(wildcard ../*mm.cc))
 hostsrc := $(firstword $(wildcard ../*bfp_test.cpp))
 
 # M, K, N: final GEMM dimensions

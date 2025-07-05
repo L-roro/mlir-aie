@@ -24,14 +24,45 @@ void zero_vectorized_v64bfp16ebs8(bfp16ebs8 *__restrict cOut) {
   }
 }
 
-template <typename T, int M, int N>
-void zero_vectorized(T *__restrict c) {
-  constexpr int r = 512 / (sizeof(T) * 8);
-  static_assert((M * N) % r == 0);
-  const aie::vector<T, r> zeros = aie::zeros<T, r>();
-  const T *__restrict c_end = c + M * N;
-  for (; c < c_end; c += r) {
-    aie::store_v(c, zeros);
+// There is a CPU version of this function in the helper.h file
+void scalarShuffleMatrixForBfp16ebs8(size_t tileWidth, size_t tileHeight, uint8_t *inBfpMatrix,
+                                     uint8_t *outBfpMatrix, bool unshuffle = false) {
+
+  tileWidth = tileWidth * 1.125;
+
+  size_t subtileWidth = 8 * 1.125;
+  size_t subtileHeight = 8;
+
+  // The main idea is that inputGlobal X and Y are traversing the input matrix in the order we want
+  // the elements to be accessed by the core, while outputGlobal X and Y are traversing the tiles in
+  // the way they are going to be sent to the accelerator. Essentially, outputGlobal X and Y are
+  // just traversing the tiles themselves as if they were contiguous and then going to the next
+  // tile.
+
+  size_t tileCountingIndex = 0;
+  // Iterate over the subtiles in each tile
+  for (size_t subtileStartY = 0; subtileStartY < tileHeight; subtileStartY += subtileHeight) {
+    for (size_t subtileStartX = 0; subtileStartX < tileWidth; subtileStartX += subtileWidth) {
+      // Iterate over the elements in each subtile
+      for (size_t i = 0; i < subtileHeight; ++i) {
+        for (size_t j = 0; j < subtileWidth; ++j) {
+          size_t inputGlobalX = subtileStartX + j;
+          size_t inputGlobalY = subtileStartY + i;
+          size_t inputIndex = inputGlobalY * tileWidth + inputGlobalX;
+
+          size_t outputGlobalX = tileCountingIndex % tileWidth;
+          size_t outputGlobalY = tileCountingIndex / tileWidth;
+          size_t outputIndex = outputGlobalY * tileWidth + outputGlobalX;
+
+          if (!unshuffle) {
+            outBfpMatrix[outputIndex] = inBfpMatrix[inputIndex];
+          } else {
+            outBfpMatrix[inputIndex] = inBfpMatrix[outputIndex];
+          }
+          tileCountingIndex++;
+        }
+      }
+    }
   }
 }
 
@@ -45,7 +76,8 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
   const unsigned sizeB = s * t;
   const unsigned sizeC = r * t;
 
-  for (unsigned z = 0; z < rowA; z += 2) chess_loop_range(2,) {
+  // chess_loop_range(2,)
+  for (unsigned z = 0; z < rowA; z += 2) {
     aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC1In(pC);
     pC1In.seek(z * colB);
     aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC2In(pC);
@@ -85,7 +117,9 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
       accC10 = mac_8x8_8x8T(A1, B0, accC10);
       accC11 = mac_8x8_8x8T(A1, B1, accC11);
 
-      for (unsigned i = 1; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(3,) {
+      // Adding this make program memory explode until it is exhausted
+      // chess_prepare_for_pipelining chess_loop_range(3,)
+      for (unsigned i = 1; i < colA; ++i) {
         A0 = pA1bfp16.pop();
         A1 = pA2bfp16.pop();
 
@@ -106,84 +140,6 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
   }
 }
 
-// This kernel is a variation of the conventional matrix multiplications in the repo that uses
-// different datatypes for the A and B.
-template <unsigned rowA, unsigned colA, unsigned colB, unsigned r, unsigned s, unsigned t>
-void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16ebs8 *__restrict pB,
-                                      bfloat16 *__restrict pC) {
-  const unsigned sizeA = r * s;
-  const unsigned sizeB = s * t;
-  const unsigned sizeC = r * t;
-
-  for (unsigned z = 0; z < rowA; z += 2) {
-    bfloat16 *__restrict pC1 = pC + (z * colB + 0) * sizeC;
-    bfloat16 *__restrict pC2 = pC + ((z + 1) * colB + 0) * sizeC;
-
-    for (unsigned j = 0; j < colB; j += 2) {
-      const bfloat16 *__restrict pA1 = pA + (z * colA + 0) * sizeA;
-      const bfloat16 *__restrict pA2 = pA + ((z + 1) * colA + 0) * sizeA;
-
-      aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB1bfp16(pB);
-      pB1bfp16.seek(j);
-      aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB2bfp16(pB);
-      pB2bfp16.seek(j + 1);
-
-      aie::vector<bfloat16, sizeA> A0 = aie::load_v<sizeA>(pA1);
-      pA1 += sizeA;
-      aie::vector<bfloat16, sizeA> A1 = aie::load_v<sizeA>(pA2);
-      pA2 += sizeA;
-      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
-      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
-
-      aie::accum<accfloat, sizeC> accC00(aie::load_v<sizeC>(pC1));
-      aie::accum<accfloat, sizeC> accC01(aie::load_v<sizeC>(pC1 + sizeC));
-      aie::accum<accfloat, sizeC> accC10(aie::load_v<sizeC>(pC2));
-      aie::accum<accfloat, sizeC> accC11(aie::load_v<sizeC>(pC2 + sizeC));
-
-      // Convert A0 into bfp16
-      aie::accum<accfloat, 64> accA0(A0);
-      // Convert A1 into bfp16 through a different VLIW slot (see bfp conversion example)
-      aie::accum<accfloat, 64> accA1 =
-          mul_elem_64(A1, concat(broadcast_one_to_v32bfloat16(), broadcast_one_to_v32bfloat16()));
-
-      accC00 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B0, accC00);
-      accC01 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B1, accC01);
-      accC10 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B0, accC10);
-      accC11 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B1, accC11);
-
-      for (unsigned i = 1; i < colA; ++i) {
-        A0 = aie::load_v<sizeA>(pA1);
-        pA1 += sizeA;
-        A1 = aie::load_v<sizeA>(pA2);
-        pA2 += sizeA;
-
-        // Convert A0 into bfp16
-        accA0 = A0;
-        // Convert A1 into bfp16 through a different VLIW slot (see bfp conversion example)
-        accA1 =
-            mul_elem_64(A1, concat(broadcast_one_to_v32bfloat16(), broadcast_one_to_v32bfloat16()));
-
-        B0 = pB1bfp16.pop_seek(colB - 1);
-        B1 = pB2bfp16.pop_seek(colB - 1);
-
-        accC00 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B0, accC00);
-        accC01 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B1, accC01);
-        accC10 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B0, accC10);
-        accC11 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B1, accC11);
-      }
-
-      aie::store_v(pC1, accC00.template to_vector<bfloat16>());
-      pC1 += sizeC;
-      aie::store_v(pC1, accC01.template to_vector<bfloat16>());
-      pC1 += sizeC;
-      aie::store_v(pC2, accC10.template to_vector<bfloat16>());
-      pC2 += sizeC;
-      aie::store_v(pC2, accC11.template to_vector<bfloat16>());
-      pC2 += sizeC;
-    }
-  }
-}
-
 extern "C" {
 void matmul_vectorized_bfp16(bfp16ebs8 *__restrict pA, bfp16ebs8 *__restrict pB,
                              bfp16ebs8 *__restrict pC, size_t m, size_t k, size_t n) {
@@ -191,13 +147,10 @@ void matmul_vectorized_bfp16(bfp16ebs8 *__restrict pA, bfp16ebs8 *__restrict pB,
   matmul_vectorized_2x2_bfp16<8, 8, 8>(pA, pB, pC, m / 8, k / 8, n / 8);
 }
 
-void matmul_vectorized_different_datatypes(bfloat16 *__restrict pA, bfp16ebs8 *__restrict pB,
-                                           bfloat16 *__restrict pC) {
-
-  matmul_vectorized_2x2_bfp16_bf16<8, 8, 8, 8, 8, 8>(pA, pB, pC);
-}
-
 void zero_kernel(bfp16ebs8 *__restrict cOut) { zero_vectorized_v64bfp16ebs8<64, 64>(cOut); }
 
-void zero_kernel_bf16(bfloat16 *__restrict cOut) { zero_vectorized<bfloat16, 64, 64>(cOut); }
+// void scalar_shuffle(uint8_t *pA, uint8_t *pC, size_t tileWidth, size_t tileHeight,
+//                     bool unshuffle = false) {
+//   scalarShuffleMatrixForBfp16ebs8(tileWidth, tileHeight, pA, pC, unshuffle);
+// }
 }

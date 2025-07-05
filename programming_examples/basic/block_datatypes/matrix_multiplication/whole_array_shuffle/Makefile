@@ -10,10 +10,13 @@
 
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 subdir=${srcdir}
-targetname=single_core
+targetname=whole_array
 devicename=npu2
 kernelsrc:= $(firstword $(wildcard ../*2.cc))
-hostsrc := $(firstword $(wildcard ../*mixed_test.cpp))
+hostsrc := $(firstword $(wildcard ../*bfp_test.cpp))
+
+n_aie_cols?=4
+aieargs+=--n-aie-cols ${n_aie_cols}
 
 # M, K, N: final GEMM dimensions
 M?=512

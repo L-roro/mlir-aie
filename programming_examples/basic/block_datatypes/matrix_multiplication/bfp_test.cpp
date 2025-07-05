@@ -182,10 +182,14 @@ int main(int argc, const char *argv[]) {
   }
 
   auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
-  std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, k, m, AVecBfp);
-
   auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
+
+  auto shuffleStart = std::chrono::high_resolution_clock::now();
+  std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, k, m, AVecBfp);
   std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);
+  auto shuffleStop = std::chrono::high_resolution_clock::now();
+
+  float shuffleTime = std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
 
   // std::ofstream outfile1("inputA.txt");
   // // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
@@ -252,7 +256,11 @@ int main(int argc, const char *argv[]) {
       std::vector<uint8_t> CVecBfp(C_VOLUME);
       memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
+      shuffleStart = std::chrono::high_resolution_clock::now();
       std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, n, m, CVecBfp, true);
+      shuffleStop = std::chrono::high_resolution_clock::now();
+
+      shuffleTime += std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
 
       auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfpShuffled.data(), 0);
 
@@ -301,6 +309,9 @@ int main(int argc, const char *argv[]) {
 
   std::cout << std::endl << "Max NPU matmul time: " << npu_time_max << "us." << std::endl;
   std::cout << "Min NPU gflops: " << macs / (1000 * npu_time_max) << std::endl;
+
+  std::cout << std::endl
+            << "Shuffle time: " << shuffleTime << "us." << std::endl;
 
   if (!errors) {
     std::cout << "\nPASS!\n\n";

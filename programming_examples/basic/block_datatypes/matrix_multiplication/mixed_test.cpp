@@ -185,7 +185,12 @@ int main(int argc, const char *argv[]) {
   }
 
   auto BVecBfp = floatToBfp16(8, B_SIZE, BVecFloat.data(), 0, 0);
+
+  auto shuffleStart = std::chrono::high_resolution_clock::now();
   std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);
+  auto shuffleStop = std::chrono::high_resolution_clock::now();
+
+  float shuffleTime = std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
 
   // std::ofstream outfile1("inputA.txt");
   // std::cout << "Input A matrix:" << std::endl;
@@ -294,6 +299,9 @@ int main(int argc, const char *argv[]) {
 
   std::cout << std::endl << "Max NPU matmul time: " << npu_time_max << "us." << std::endl;
   std::cout << "Min NPU gflops: " << macs / (1000 * npu_time_max) << std::endl;
+
+  std::cout << std::endl
+            << "Shuffle time: " << shuffleTime << "us." << std::endl;
 
   if (!errors) {
     std::cout << "\nPASS!\n\n";
