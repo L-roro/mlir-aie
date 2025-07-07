@@ -260,10 +260,6 @@ int main(int argc, const char *argv[]) {
         errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
             M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
       }
-      if (verbosity >= 2) {
-        std::cout << "C =" << std::endl;
-        matmul_common::print_matrix(CVec, K, 16, 16);
-      }
       auto vstop = std::chrono::system_clock::now();
       float vtime =
           std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart)

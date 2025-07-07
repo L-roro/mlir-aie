@@ -157,6 +157,12 @@ int main(int argc, const char *argv[]) {
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
     AVec[i] = (float)((rand() % 8));
+    // AVec[i] = i % 8 == 0 ? -4.0 : 1.0;
+    // if (i < 64 * 8 && i % 64 == 0) {
+    //   AVec[i] = -i;
+    // } else {
+    //   AVec[i] = 0;
+    // }
     // AVec[i] = i;
     // if (i % N == i / N) {
     //   AVec[i] = 1.0;
@@ -189,12 +195,13 @@ int main(int argc, const char *argv[]) {
   std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);
   auto shuffleStop = std::chrono::high_resolution_clock::now();
 
-  float shuffleTime = std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
+  float inputShuffleTime =
+      std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
 
-  // std::ofstream outfile1("inputA.txt");
-  // // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
-  // printBfp16ebs8Array(A_VOLUME, AVecBfpShuffled, 16, 16, outfile1);
-  // outfile1.close();
+  std::ofstream outfile1("inputA.txt");
+  // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
+  printBfp16ebs8Array(A_VOLUME, AVecBfpShuffled, 16, 16, outfile1);
+  outfile1.close();
 
   // std::ofstream outfile2("inputB.txt");
   // // matmul_common::print_matrix(BVecBfpShuffled, K, N, K, outfile2, " ", " ... ", 0);
@@ -228,6 +235,7 @@ int main(int argc, const char *argv[]) {
   float npu_time_total = 0;
   float npu_time_min = 9999999;
   float npu_time_max = 0;
+  float outShuffleTime = 0;
 
   int errors = 0;
   float macs = 2.0 * float(M) * float(K) * float(N);
@@ -256,11 +264,13 @@ int main(int argc, const char *argv[]) {
       std::vector<uint8_t> CVecBfp(C_VOLUME);
       memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
-      shuffleStart = std::chrono::high_resolution_clock::now();
+      auto outShuffleStart = std::chrono::high_resolution_clock::now();
       std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, n, m, CVecBfp, true);
-      shuffleStop = std::chrono::high_resolution_clock::now();
+      auto outShuffleStop = std::chrono::high_resolution_clock::now();
 
-      shuffleTime += std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
+      outShuffleTime +=
+          std::chrono::duration_cast<std::chrono::microseconds>(outShuffleStop - outShuffleStart)
+              .count();
 
       auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfpShuffled.data(), 0);
 
@@ -269,8 +279,9 @@ int main(int argc, const char *argv[]) {
       }
       auto vstart = std::chrono::system_clock::now();
       if (do_verify_stochastic) {
-        errors = matmul_common::verify_stochastic<float, float, float>(M, N, K, AVec, BVec, CVec,
-                                                                       verify_stochastic_n_samples);
+        errors = matmul_common::verify_stochastic<float, float, float>(
+            M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity, abs_tol, rel_tol,
+            true);
       } else {
         errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity,
                                                             abs_tol, rel_tol, true);
@@ -279,6 +290,7 @@ int main(int argc, const char *argv[]) {
 
       // std::ofstream outfile("output.txt");
       // matmul_common::print_matrix(CVec, N, M, N, outfile, " ", " ... ", 0);
+      // printBfp16ebs8Array(C_VOLUME, CVecBfp, 16, 16, outfile);
       // outfile.close();
 
       float vtime = std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart).count();
@@ -311,7 +323,8 @@ int main(int argc, const char *argv[]) {
   std::cout << "Min NPU gflops: " << macs / (1000 * npu_time_max) << std::endl;
 
   std::cout << std::endl
-            << "Shuffle time: " << shuffleTime << "us." << std::endl;
+            << "Shuffle time: " << inputShuffleTime + (outShuffleTime / n_iterations) << "us."
+            << std::endl;
 
   if (!errors) {
     std::cout << "\nPASS!\n\n";

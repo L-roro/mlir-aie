@@ -99,10 +99,10 @@ cd ../whole_array_mixed
 mkdir results
 mkdir logs
 
-run_selected_hyperparameters 64 64 64 8 8 8 bfp16/bf16 bf16 4 1
+run_selected_hyperparameters 64 64 64 8 8 8 bfp16-bf16 bf16 4 1
 
 cd ../whole_array
 run_selected_hyperparameters 64 64 64 8 8 8 bfp16 bfp16 8 1
 
 cd ../whole_array_mixed
-run_selected_hyperparameters 64 64 64 8 8 8 bfp16/bf16 bf16 8 1
+run_selected_hyperparameters 64 64 64 8 8 8 bfp16-bf16 bf16 8 1

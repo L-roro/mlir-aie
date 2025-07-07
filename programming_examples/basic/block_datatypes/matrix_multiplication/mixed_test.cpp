@@ -34,6 +34,9 @@ using bfloat16_t = double;
 #define XSTR(X) STR(X)
 #define STR(X) #X
 
+constexpr long long verify_stochastic_threshold = 1024 * 1024;
+constexpr int verify_stochastic_n_samples = 1000;
+
 // Verification tolerance
 // See "Note on Numerical Tolerances" in README.md
 // TODO: This might have to be adjusted for bfp
@@ -67,6 +70,12 @@ int main(int argc, const char *argv[]) {
   int K = vm["K"].as<int>();
   int N = vm["N"].as<int>();
 
+  int m = vm["w"].as<int>();
+  int k = vm["y"].as<int>();
+  int n = vm["z"].as<int>();
+
+  bool do_verify_stochastic = (long long)M * N > verify_stochastic_threshold;
+
   if (verbosity >= 1) {
     std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
   }
@@ -74,10 +83,6 @@ int main(int argc, const char *argv[]) {
   int A_SIZE = M * K;
   int B_SIZE = N * K;
   int C_SIZE = M * N;
-
-  int m = vm["w"].as<int>();
-  int k = vm["y"].as<int>();
-  int n = vm["z"].as<int>();
 
   size_t A_VOLUME = (A_SIZE * sizeof(uint8_t)) * 1.125;
   size_t B_VOLUME = (B_SIZE * sizeof(uint8_t)) * 1.125;
@@ -190,7 +195,8 @@ int main(int argc, const char *argv[]) {
   std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);
   auto shuffleStop = std::chrono::high_resolution_clock::now();
 
-  float shuffleTime = std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
+  float shuffleTime =
+      std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
 
   // std::ofstream outfile1("inputA.txt");
   // std::cout << "Input A matrix:" << std::endl;
@@ -263,8 +269,15 @@ int main(int argc, const char *argv[]) {
         std::cout << "Verifying against reference matmul ..." << std::endl;
       }
       auto vstart = std::chrono::system_clock::now();
-      errors = matmul_common::verify<std::bfloat16_t, std::bfloat16_t, std::bfloat16_t>(
-          M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, true);
+      if (do_verify_stochastic) {
+        errors =
+            matmul_common::verify_stochastic<std::bfloat16_t, std::bfloat16_t, std::bfloat16_t>(
+                M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity, abs_tol, rel_tol,
+                true);
+      } else {
+        errors = matmul_common::verify<std::bfloat16_t, std::bfloat16_t, std::bfloat16_t>(
+            M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, true);
+      }
       auto vstop = std::chrono::system_clock::now();
 
       // std::ofstream outfile("output.txt");
@@ -300,8 +313,7 @@ int main(int argc, const char *argv[]) {
   std::cout << std::endl << "Max NPU matmul time: " << npu_time_max << "us." << std::endl;
   std::cout << "Min NPU gflops: " << macs / (1000 * npu_time_max) << std::endl;
 
-  std::cout << std::endl
-            << "Shuffle time: " << shuffleTime << "us." << std::endl;
+  std::cout << std::endl << "Shuffle time: " << shuffleTime << "us." << std::endl;
 
   if (!errors) {
     std::cout << "\nPASS!\n\n";
@@ -309,6 +321,9 @@ int main(int argc, const char *argv[]) {
   }
 
   std::cout << "\nError count: " << errors;
+  if (do_verify_stochastic) {
+    std::cout << " (out of " << verify_stochastic_n_samples << " random samples)";
+  }
   std::cout << "\n\n";
 
   std::cout << "\nFailed.\n\n";
