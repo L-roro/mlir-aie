@@ -202,7 +202,9 @@ inline std::vector<float> bfp16ebs8ToFloat(int size, uint8_t *array, int verbose
       printf("multiplier = %f\n", multiplier);
     }
     for (int j = 1; j < block + 1; j++) {
-      res[tempIndx] = float(array[i + j] * multiplier);
+      bool negative = array[i + j] & 0x80;
+      res[tempIndx] = float((array[i + j] & 0x7F) * multiplier);
+      res[tempIndx] = negative ? -res[tempIndx] : res[tempIndx];
       if (verbose) {
         printf("return_array[%d] = %f\n", tempIndx, res[tempIndx]);
       }
