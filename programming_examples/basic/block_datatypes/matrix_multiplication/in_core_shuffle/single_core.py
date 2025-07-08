@@ -35,10 +35,8 @@ def my_matmul(M, K, N, m, k, n):
 
     # Define tensor types
     A_ty = np.ndarray[(M * K // 8,), np.dtype[v8bfp16ebs8]]
-    B_ty = np.ndarray[(K * N // 8,), np.dtype[v8bfp16ebs8]]
     C_ty = np.ndarray[(M * N // 8,), np.dtype[v8bfp16ebs8]]
     a_ty = np.ndarray[(m * k // 8,), np.dtype[v8bfp16ebs8]]
-    b_ty = np.ndarray[(k * n // 8,), np.dtype[v8bfp16ebs8]]
     c_ty = np.ndarray[(m * n // 8,), np.dtype[v8bfp16ebs8]]
 
     vectorized_shuffle_kernel = Kernel(
@@ -56,40 +54,31 @@ def my_matmul(M, K, N, m, k, n):
     inA = ObjectFifo(a_ty, name="inA")
     memA = inA.cons().forward(name="memA")
 
-    inB = ObjectFifo(b_ty, name="inB")
-    b_dims = [(8, 8), (8, 64), (8, 1)]
-    memB = inB.cons().forward(name="memB", dims_to_stream=b_dims)
-
     memC = ObjectFifo(c_ty, name="memC")
     outC = memC.cons().forward(name="outC")
 
-    def core_fn(of_a, of_b, of_c, vectorized_shuffle_kernel, scalar_shuffle_kernel):
+    def core_fn(of_a, of_c, vectorized_shuffle_kernel, scalar_shuffle_kernel):
         elem_out = of_c.acquire(1)
-
         elem_in_a = of_a.acquire(1)
-        elem_in_b = of_b.acquire(1)
         # Note that it is possible to use a buffer here to
         # do the shuffling in instead:
         # buffer = LocalBuffer(a_ty)
         # vectorized_shuffle_kernel(elem_in_a, elem_out, k, m, False)
         scalar_shuffle_kernel(elem_in_a, elem_out, k, m, False)
         of_a.release(1)
-        of_b.release(1)
-
         of_c.release(1)
 
     worker = Worker(
         core_fn,
-        [memA.cons(), memB.cons(), memC.prod(), vectorized_shuffle_kernel, scalar_shuffle_kernel],
+        [memA.cons(), memC.prod(), vectorized_shuffle_kernel, scalar_shuffle_kernel],
         stack_size=0xF00,
     )
 
     # Note that B is completely unused in this design, will have to be removed in the future
     rt = Runtime()
-    with rt.sequence(A_ty, B_ty, C_ty) as (A, B, C):
+    with rt.sequence(A_ty, C_ty) as (A, C):
         rt.start(worker)
         rt.fill(inA.prod(), A)
-        rt.fill(inB.prod(), B)
         rt.drain(outC.cons(), C, wait=True)
 
     dev_ty = NPU2()

@@ -143,7 +143,6 @@ int main(int argc, const char *argv[]) {
   auto bo_instr =
       xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
   auto bo_a = xrt::bo(device, A_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
-  auto bo_b = xrt::bo(device, B_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
   auto bo_out = xrt::bo(device, C_VOLUME, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
 
   // ------------------------------------------------------
@@ -163,10 +162,10 @@ int main(int argc, const char *argv[]) {
     // } else {
     //   AVec[i] = 0.0;
     // }
-
-    // AVec[i] = (i / 8) % 1000;
   }
 
+  // This matrix does not do anything in this example, it is just an identity matrix to
+  // verify with the same methods as the matrix multiplications.
   std::vector<float> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
@@ -177,37 +176,21 @@ int main(int argc, const char *argv[]) {
     } else {
       BVec[i] = 0.0;
     }
-
-    // BVec[i] = i % 8;
   }
 
   auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
-  // For debugging
-  // for (int i = 0; i < A_SIZE * 1.125; i++) {
-  //   AVecBfp[i] = (i / 9) % 64;
-  // }
   std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, k, m, AVecBfp);
 
-  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
-  // std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, BVecBfp);
-
-  std::ofstream outfile1("inputA.txt");
-  // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, std::cout, " ", " ... ", 0);
-  printBfp16ebs8Array(A_VOLUME, AVecBfp, 8, 64, outfile1);
-  outfile1.close();
-
-  // std::ofstream outfile2("inputB.txt");
-  // // matmul_common::print_matrix(BVecBfpShuffled, K, N, K, outfile2, " ", " ... ", 0);
-  // printBfp16ebs8Array(B_VOLUME, BVecBfpShuffled, 16, 16, outfile2);
-  // outfile2.close();
+  // std::ofstream outfile1("inputA.txt");
+  // // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, std::cout, " ", " ... ", 0);
+  // printBfp16ebs8Array(A_VOLUME, AVecBfp, 8, 64, outfile1);
+  // outfile1.close();
 
   // ------------------------------------------------------
   // Write data into buffers
   // ------------------------------------------------------
   uint8_t *bufA = bo_a.map<uint8_t *>();
-  uint8_t *bufB = bo_b.map<uint8_t *>();
   memcpy(bufA, AVecBfp.data(), A_VOLUME);
-  memcpy(bufB, BVecBfp.data(), B_VOLUME);
 
   // Initialize outputs; bufOut is results matrix
   char *bufOut = bo_out.map<char *>();
@@ -218,7 +201,6 @@ int main(int argc, const char *argv[]) {
 
   bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_out.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
   // ------------------------------------------------------
@@ -235,7 +217,7 @@ int main(int argc, const char *argv[]) {
   for (unsigned iter = 0; iter < num_iter; iter++) {
     auto start = std::chrono::high_resolution_clock::now();
     unsigned int opcode = 3;
-    auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out);
+    auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_out);
     ert_cmd_state r = run.wait();
     if (r != ERT_CMD_STATE_COMPLETED) {
       std::cout << "Kernel did not complete. Returned status: " << r << "\n";
@@ -256,18 +238,18 @@ int main(int argc, const char *argv[]) {
       std::vector<uint8_t> CVecBfp(C_VOLUME);
       memcpy(CVecBfp.data(), bufOut, C_VOLUME);
 
-      std::ofstream outfile("output.txt");
-      printBfp16ebs8Array(C_VOLUME, CVecBfp, 8, 64, outfile);
-      outfile.close();
+      // std::ofstream outfile("output.txt");
+      // printBfp16ebs8Array(C_VOLUME, CVecBfp, 8, 64, outfile);
+      // outfile.close();
 
       // std::vector<uint8_t> CVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, M, CVecBfp, true);
-
       auto CVec = bfp16ebs8ToFloat(C_VOLUME, CVecBfp.data(), 0);
 
       // This is just a hack that should be removed later, I am multiplying by the identity and
       // comparing AVec between the CPU and NPU shuffling. This is just wasteful and adds a very
       // high complexity: it is just meant to save on time while testing the shuffling in core. Note
       // that B is actually not even used.
+      // The idea is that since B is the identity matrix, C should be equal to A shuffled, which is A_ShuffledxId.
       AVec = bfp16ebs8ToFloat(A_VOLUME, AVecBfpShuffled.data(), 0);
 
       if (verbosity >= 1) {
@@ -275,8 +257,9 @@ int main(int argc, const char *argv[]) {
       }
       auto vstart = std::chrono::system_clock::now();
       if (do_verify_stochastic) {
-        errors = matmul_common::verify_stochastic<float, float, float>(M, N, K, AVec, BVec, CVec,
-                                                                       verify_stochastic_n_samples);
+        errors = matmul_common::verify_stochastic<float, float, float>(
+            M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity, abs_tol, rel_tol,
+            true);
       } else {
         errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity,
                                                             abs_tol, rel_tol, true);
