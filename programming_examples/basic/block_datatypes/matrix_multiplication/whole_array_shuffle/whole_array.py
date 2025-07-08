@@ -196,7 +196,7 @@ def my_matmul(M, K, N, m, k, n, n_aie_cols):
     # Tasks for each worker to perform
     def core_fn(in_a, in_b, out_c, zero, matmul, shuffle):
         bufferA = LocalBuffer(A_l1_ty)
-        bufferB = LocalBuffer(B_l1_ty)
+        bufferC = LocalBuffer(B_l1_ty)
         loop = range(1)  # Workaround for issue #1547
         if n_tiles_per_core > 1:
             loop = range_(n_tiles_per_core)
@@ -207,9 +207,8 @@ def my_matmul(M, K, N, m, k, n, n_aie_cols):
             for _ in range_(K // k):
                 elem_in_a = in_a.acquire(1)
                 elem_in_b = in_b.acquire(1)
-                shuffle(elem_in_a, bufferA, k // 8, m, False)
-                shuffle(elem_in_b, bufferB, n // 8, k, False)
-                matmul(bufferA, bufferB, elem_out, m, k, n)
+                shuffle(elem_in_a, bufferA, k, m, False)
+                matmul(bufferA, elem_in_b, elem_out, m, k, n)
                 # shuffle(elem_out, bufferA, n // 8, m, True)
                 in_a.release(1)
                 in_b.release(1)

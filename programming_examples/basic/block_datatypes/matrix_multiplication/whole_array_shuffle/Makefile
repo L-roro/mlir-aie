@@ -12,8 +12,8 @@ srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 subdir=${srcdir}
 targetname=whole_array
 devicename=npu2
-kernelsrc:= $(firstword $(wildcard ../*2.cc))
-hostsrc := $(firstword $(wildcard ../*bfp_test.cpp))
+kernelsrc:= $(firstword $(wildcard ../*mm.cc))
+hostsrc := $(firstword $(wildcard *test.cpp))
 
 n_aie_cols?=4
 aieargs+=--n-aie-cols ${n_aie_cols}
