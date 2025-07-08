@@ -9,7 +9,6 @@
 //===----------------------------------------------------------------------===//
 
 #include <aie_api/aie.hpp>
-#include <cstddef>
 
 template <int M, int N>
 void zero_vectorized_v64bfp16ebs8(bfp16ebs8 *__restrict cOut) {
@@ -33,17 +32,10 @@ void scalarShuffleMatrixForBfp16ebs8(size_t tileWidth, size_t tileHeight, uint8_
   size_t subtileWidth = 8 * 1.125;
   size_t subtileHeight = 8;
 
-  // The main idea is that inputGlobal X and Y are traversing the input matrix in the order we want
-  // the elements to be accessed by the core, while outputGlobal X and Y are traversing the tiles in
-  // the way they are going to be sent to the accelerator. Essentially, outputGlobal X and Y are
-  // just traversing the tiles themselves as if they were contiguous and then going to the next
-  // tile.
-
   size_t tileCountingIndex = 0;
-  // Iterate over the subtiles in each tile
   for (size_t subtileStartY = 0; subtileStartY < tileHeight; subtileStartY += subtileHeight) {
     for (size_t subtileStartX = 0; subtileStartX < tileWidth; subtileStartX += subtileWidth) {
-      // Iterate over the elements in each subtile
+
       for (size_t i = 0; i < subtileHeight; ++i) {
         for (size_t j = 0; j < subtileWidth; ++j) {
           size_t inputGlobalX = subtileStartX + j;
@@ -149,8 +141,8 @@ void matmul_vectorized_bfp16(bfp16ebs8 *__restrict pA, bfp16ebs8 *__restrict pB,
 
 void zero_kernel(bfp16ebs8 *__restrict cOut) { zero_vectorized_v64bfp16ebs8<64, 64>(cOut); }
 
-// void scalar_shuffle(uint8_t *pA, uint8_t *pC, size_t tileWidth, size_t tileHeight,
-//                     bool unshuffle = false) {
-//   scalarShuffleMatrixForBfp16ebs8(tileWidth, tileHeight, pA, pC, unshuffle);
-// }
+void scalar_shuffle(uint8_t *pA, uint8_t *pC, size_t tileWidth, size_t tileHeight,
+                    bool unshuffle = false) {
+  scalarShuffleMatrixForBfp16ebs8(tileWidth, tileHeight, pA, pC, unshuffle);
+}
 }

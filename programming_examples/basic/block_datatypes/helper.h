@@ -8,6 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <bitset>
 #include <cassert>
 #include <cfloat>
 #include <cmath>
@@ -278,6 +279,14 @@ inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t matrixWidth, size_t
   }
 
   return res;
+}
+
+inline std::string toBinaryString(int8_t n) {
+    std::bitset<8> bits(static_cast<uint8_t>(n));
+    std::string binary_str = bits.to_string();
+    binary_str.insert(4, " ");
+    
+    return binary_str;
 }
 
 // Pretty print to ostream a bfp16ebs8 array
