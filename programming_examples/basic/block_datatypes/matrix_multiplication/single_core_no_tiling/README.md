@@ -11,4 +11,3 @@
 # Matrix Multiplication - Single Core Design
 
 TODO: Complete the README
-Currently, this is an attempt to port Ali's code to peano and to somewhat clean it up. IT should take as input block floating point and output block floating point as well.
