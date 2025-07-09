@@ -64,7 +64,7 @@ def my_matmul(M, K, N, m, k, n, n_aie_cols):
     assert k % s == 0
     assert n % t == 0
 
-    assert (m==64 and k == 64 and n == 64), """Only 64x64x64 tiles are supported in this example"""
+    # assert (m==64 and k == 64 and n == 64), """Only 64x64x64 tiles are supported in this example"""
 
     # If you get errors during CDO generation due to running out of program
     # memory, it may be because too much code is generated due to ObjectFIFO

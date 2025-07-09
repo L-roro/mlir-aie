@@ -187,8 +187,8 @@ int main(int argc, const char *argv[]) {
     // BVec[i] = i % 8;
   }
 
-  auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
-  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
+  auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0);
+  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0);
 
   // auto shuffleStart = std::chrono::high_resolution_clock::now();
   // std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, k,

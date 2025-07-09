@@ -156,15 +156,9 @@ int main(int argc, const char *argv[]) {
   std::vector<float> AVec(A_SIZE);
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    AVec[i] = (float)((rand() % 8));
-    // AVec[i] = i % 8 == 0 ? -4.0 : 1.0;
-    // if (i < 64 * 8 && i % 64 == 0) {
-    //   AVec[i] = -i;
-    // } else {
-    //   AVec[i] = 0;
-    // }
-    // AVec[i] = i;
-    // if (i % N == i / N) {
+    AVec[i] = (float)((rand() % 8) - 4);
+
+    // if (i % K == i / K) {
     //   AVec[i] = 1.0;
     // } else {
     //   AVec[i] = 0.0;
@@ -176,13 +170,18 @@ int main(int argc, const char *argv[]) {
   std::vector<float> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    BVec[i] = (float)((rand() % 8));
+    BVec[i] = (float)((rand() % 8) - 4);
     // Diagonal:
     // if (i % K == i / K) {
     //   BVec[i] = 1.0;
     // } else {
     //   BVec[i] = 0.0;
     // }
+
+    // if (i % 128 < 8 && i / 128 < 8)
+    //   BVec[i] = i / 8;
+    // else
+    //   BVec[i] = 0.0;
 
     // BVec[i] = i / 8;
   }
@@ -196,7 +195,7 @@ int main(int argc, const char *argv[]) {
 
   auto shuffleStart = std::chrono::high_resolution_clock::now();
   std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, k, m, AVecBfp);
-  std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);
+  std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, N, k, n, BVecBfp);
   auto shuffleStop = std::chrono::high_resolution_clock::now();
 
   float inputShuffleTime =
@@ -209,7 +208,7 @@ int main(int argc, const char *argv[]) {
 
   // std::ofstream outfile2("inputBShuffled.txt");
   // auto temp = bfp16ebs8ToFloat(B_VOLUME, BVecBfpShuffled.data());
-  // printBfp16ebs8Array(B_VOLUME, BVecBfpShuffled, 16, 16, outfile2);
+  // // printBfp16ebs8Array(B_VOLUME, BVecBfpShuffled, 16, 16, outfile2);
   // matmul_common::print_matrix(temp, K, N, K, outfile2, " ", " ... ", 3);
   // outfile2.close();
 
@@ -295,7 +294,7 @@ int main(int argc, const char *argv[]) {
 
       // std::ofstream outfile("output.txt");
       // matmul_common::print_matrix(CVec, N, M, N, outfile, " ", " ... ", 3);
-      // printBfp16ebs8Array(C_VOLUME, CVecBfp, 16, 16, outfile);
+      // // printBfp16ebs8Array(C_VOLUME, CVecBfp, 16, 16, outfile);
       // outfile.close();
 
       float vtime = std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart).count();

@@ -18,10 +18,10 @@ def ceildiv(a, b):
 
 def my_matmul():
     M = 64
-    K = 64
+    K = 128
     N = 64
     m = 64
-    k = 64
+    k = 128
     n = 64
 
     # Define tensor types

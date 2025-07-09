@@ -109,6 +109,7 @@ mkdir results
 mkdir logs
 run_selected_hyperparameters 64 64 64 8 8 8 bfp16 bfp16-shuffle 8 1
 
+# I want to run this again to see if the transposition and pipelining pragmas change anything
 cd ../whole_array
 mkdir results
 mkdir logs

@@ -19,6 +19,7 @@
 #include <ostream>
 #include <random>
 #include <vector>
+#include <fstream>
 
 inline std::string toBinaryString(int8_t n) {
   std::bitset<8> bits(static_cast<uint8_t>(n));

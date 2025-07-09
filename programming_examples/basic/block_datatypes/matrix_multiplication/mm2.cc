@@ -9,7 +9,6 @@
 //===----------------------------------------------------------------------===//
 
 #include <aie_api/aie.hpp>
-#include <cstddef>
 
 template <typename T, int M, int N>
 void zero_vectorized(T *__restrict c) {
