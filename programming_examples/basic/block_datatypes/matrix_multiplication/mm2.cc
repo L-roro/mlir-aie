@@ -23,7 +23,8 @@ void zero_vectorized(T *__restrict c) {
 }
 
 // This kernel is a variation of the conventional matrix multiplications in the repo that uses
-// different datatypes for the A and B.
+// different datatypes for the A and B and performs a conversion for the A matrix.
+// This kernel should be followed along with the equivalent on in bfp16 only on mm.cc
 template <unsigned rowA, unsigned colA, unsigned colB, unsigned r, unsigned s, unsigned t>
 void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16ebs8 *__restrict pB,
                                       bfloat16 *__restrict pC) {
@@ -31,25 +32,33 @@ void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16
   const unsigned sizeB = s * t;
   const unsigned sizeC = r * t;
 
-  for (unsigned z = 0; z < rowA; z += 2) {
+  for (unsigned z = 0; z < rowA; z += 2) chess_loop_range(2,) {
     bfloat16 *__restrict pC1 = pC + (z * colB + 0) * sizeC;
     bfloat16 *__restrict pC2 = pC + ((z + 1) * colB + 0) * sizeC;
 
-    for (unsigned j = 0; j < colB; j += 2) {
+    for (unsigned j = 0; j < colB; j += 2) chess_loop_range(2,) {
       const bfloat16 *__restrict pA1 = pA + (z * colA + 0) * sizeA;
       const bfloat16 *__restrict pA2 = pA + ((z + 1) * colA + 0) * sizeA;
 
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB1bfp16(pB);
-      pB1bfp16.seek(j);
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB2bfp16(pB);
-      pB2bfp16.seek(j + 1);
+
+      // For non transposed matrix
+      // pB1bfp16.seek(j);
+      // pB2bfp16.seek(j + 1);
+      pB1bfp16.seek(j * colA);
+      pB2bfp16.seek((j + 1) * colA);
 
       aie::vector<bfloat16, sizeA> A0 = aie::load_v<sizeA>(pA1);
       pA1 += sizeA;
       aie::vector<bfloat16, sizeA> A1 = aie::load_v<sizeA>(pA2);
       pA2 += sizeA;
-      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
-      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
+
+      // For non transposed matrix
+      // aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
+      // aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
+      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop();
+      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop();
 
       aie::accum<accfloat, sizeC> accC00(aie::load_v<sizeC>(pC1));
       aie::accum<accfloat, sizeC> accC01(aie::load_v<sizeC>(pC1 + sizeC));
@@ -67,7 +76,7 @@ void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16
       accC10 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B0, accC10);
       accC11 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B1, accC11);
 
-      for (unsigned i = 1; i < colA; ++i) {
+      for (unsigned i = 1; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(3,) {
         A0 = aie::load_v<sizeA>(pA1);
         pA1 += sizeA;
         A1 = aie::load_v<sizeA>(pA2);
@@ -79,8 +88,11 @@ void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16
         accA1 =
             mul_elem_64(A1, concat(broadcast_one_to_v32bfloat16(), broadcast_one_to_v32bfloat16()));
 
-        B0 = pB1bfp16.pop_seek(colB - 1);
-        B1 = pB2bfp16.pop_seek(colB - 1);
+        // For non transposed matrix
+        // B0 = pB1bfp16.pop_seek(colB - 1);
+        // B1 = pB2bfp16.pop_seek(colB - 1);
+        B0 = pB1bfp16.pop();
+        B1 = pB2bfp16.pop();
 
         accC00 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B0, accC00);
         accC01 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B1, accC01);

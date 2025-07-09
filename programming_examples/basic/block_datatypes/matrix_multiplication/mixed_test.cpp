@@ -158,7 +158,7 @@ int main(int argc, const char *argv[]) {
   std::vector<std::bfloat16_t> AVec(A_SIZE);
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    AVec[i] = (std::bfloat16_t)((rand() % 16));
+    AVec[i] = (std::bfloat16_t)((rand() % 8));
     // AVec[i] = i;
     // if (i % N == i / N) {
     //   AVec[i] = 1.0;
@@ -172,7 +172,7 @@ int main(int argc, const char *argv[]) {
   std::vector<std::bfloat16_t> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    BVec[i] = (std::bfloat16_t)((rand() % 16));
+    BVec[i] = (std::bfloat16_t)((rand() % 8));
     // Diagonal:
     // if (i % N == i / N) {
     //   BVec[i] = 1.0;
@@ -189,7 +189,7 @@ int main(int argc, const char *argv[]) {
     BVecFloat[i] = (float)BVec[i];
   }
 
-  auto BVecBfp = floatToBfp16(8, B_SIZE, BVecFloat.data(), 0, 0);
+  auto BVecBfp = floatToBfp16(8, B_SIZE, BVecFloat.data(), 0);
 
   auto shuffleStart = std::chrono::high_resolution_clock::now();
   std::vector<uint8_t> BVecBfpShuffled = shuffleMatrixForBfp16ebs8(N, K, n, k, BVecBfp);

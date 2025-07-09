@@ -60,6 +60,11 @@ void scalarShuffleMatrixForBfp16ebs8(size_t tileWidth, size_t tileHeight, uint8_
 
 // This kernel mirrors the one found in https://xilinx.github.io/aie_api/group__group__mmul.html
 // Go through them in parallel to understand how the bfp datatype modifies accesses to memory
+// Note that this kernel assumes that the B matrix is already transposed, which is not the case
+// for the example in the link. The equivalent transformations for a non transposed B matrix are
+// commented out below.
+// Also note that assuming the 8x8 tile are already transposed (the ones done during the shuffle), 
+// the higher level tiling transposition should be free using data layout transformations.
 template <unsigned r, unsigned s, unsigned t>
 void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8 *__restrict pB,
                                  bfp16ebs8 *__restrict pC, unsigned rowA, unsigned colA,
@@ -68,8 +73,7 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
   const unsigned sizeB = s * t;
   const unsigned sizeC = r * t;
 
-  // chess_loop_range(2,)
-  for (unsigned z = 0; z < rowA; z += 2) {
+  for (unsigned z = 0; z < rowA; z += 2) chess_loop_range(2,) {
     aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC1In(pC);
     pC1In.seek(z * colB);
     aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pC2In(pC);
@@ -79,21 +83,29 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
     aie::block_vector_output_buffer_stream<bfp16ebs8, 64> pC2Out(pC);
     pC2Out.seek((z + 1) * colB);
 
-    for (unsigned j = 0; j < colB; j += 2) {
+    for (unsigned j = 0; j < colB; j += 2) chess_loop_range(2,) {
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pA1bfp16(pA);
       pA1bfp16.seek(z * colA);
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pA2bfp16(pA);
       pA2bfp16.seek((z + 1) * colA);
 
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB1bfp16(pB);
-      pB1bfp16.seek(j);
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB2bfp16(pB);
-      pB2bfp16.seek(j + 1);
+      
+      // For non transposed matrix
+      // pB1bfp16.seek(j);
+      // pB2bfp16.seek(j + 1);
+      pB1bfp16.seek(j * colA);
+      pB2bfp16.seek((j + 1) * colA);
 
       aie::block_vector<bfp16ebs8, sizeA> A0 = pA1bfp16.pop();
       aie::block_vector<bfp16ebs8, sizeA> A1 = pA2bfp16.pop();
-      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
-      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
+
+      // For non transposed matrix
+      // aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
+      // aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
+      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop();
+      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop();
 
       // Note that unlike the example mentioned above, we need
       // to use a mac to take into account results from previous kernel calls
@@ -109,14 +121,15 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
       accC10 = mac_8x8_8x8T(A1, B0, accC10);
       accC11 = mac_8x8_8x8T(A1, B1, accC11);
 
-      // Adding this make program memory explode until it is exhausted
-      // chess_prepare_for_pipelining chess_loop_range(3,)
-      for (unsigned i = 1; i < colA; ++i) {
+      for (unsigned i = 1; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(3,) {
         A0 = pA1bfp16.pop();
         A1 = pA2bfp16.pop();
 
-        B0 = pB1bfp16.pop_seek(colB - 1);
-        B1 = pB2bfp16.pop_seek(colB - 1);
+        // For non transposed matrix
+        // B0 = pB1bfp16.pop_seek(colB - 1);
+        // B1 = pB2bfp16.pop_seek(colB - 1);
+        B0 = pB1bfp16.pop();
+        B1 = pB2bfp16.pop();
 
         accC00 = mac_8x8_8x8T(A0, B0, accC00);
         accC01 = mac_8x8_8x8T(A0, B1, accC01);

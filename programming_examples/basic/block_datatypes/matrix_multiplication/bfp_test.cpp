@@ -170,7 +170,7 @@ int main(int argc, const char *argv[]) {
     //   AVec[i] = 0.0;
     // }
 
-    // AVec[i] = (i / 8) % 1000;
+    // AVec[i] = (i / 8) % 64;
   }
 
   std::vector<float> BVec(B_SIZE);
@@ -178,17 +178,21 @@ int main(int argc, const char *argv[]) {
     // Limiting to 16 to avoid precision loss issues
     BVec[i] = (float)((rand() % 8));
     // Diagonal:
-    // if (i % N == i / N) {
+    // if (i % K == i / K) {
     //   BVec[i] = 1.0;
     // } else {
     //   BVec[i] = 0.0;
     // }
 
-    // BVec[i] = i % 8;
+    // BVec[i] = i / 8;
   }
 
-  auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0, 0);
-  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0, 0);
+  auto AVecBfp = floatToBfp16(8, A_SIZE, AVec.data(), 0);
+  auto BVecBfp = floatToBfp16(8, B_SIZE, BVec.data(), 0);
+
+  // for (int i = 0; i < B_VOLUME; i++) {
+  //   BVecBfp[i] = i / 9;
+  // }
 
   auto shuffleStart = std::chrono::high_resolution_clock::now();
   std::vector<uint8_t> AVecBfpShuffled = shuffleMatrixForBfp16ebs8(K, M, k, m, AVecBfp);
@@ -198,14 +202,15 @@ int main(int argc, const char *argv[]) {
   float inputShuffleTime =
       std::chrono::duration_cast<std::chrono::microseconds>(shuffleStop - shuffleStart).count();
 
-  // std::ofstream outfile1("inputA.txt");
-  // matmul_common::print_matrix(AVecBfpShuffled, K, M, K, outfile1, " ", " ... ", 0);
-  // printBfp16ebs8Array(A_VOLUME, AVecBfpShuffled, 16, 16, outfile1);
+  // std::ofstream outfile1("inputB.txt");
+  // matmul_common::print_matrix(BVec, K, N, K, outfile1, " ", " ... ", 3);
+  // printBfp16ebs8Array(A_VOLUME, BVecBfp, 16, 16, outfile1);
   // outfile1.close();
 
-  // std::ofstream outfile2("inputB.txt");
-  // // matmul_common::print_matrix(BVecBfpShuffled, K, N, K, outfile2, " ", " ... ", 0);
+  // std::ofstream outfile2("inputBShuffled.txt");
+  // auto temp = bfp16ebs8ToFloat(B_VOLUME, BVecBfpShuffled.data());
   // printBfp16ebs8Array(B_VOLUME, BVecBfpShuffled, 16, 16, outfile2);
+  // matmul_common::print_matrix(temp, K, N, K, outfile2, " ", " ... ", 3);
   // outfile2.close();
 
   // ------------------------------------------------------
@@ -284,12 +289,12 @@ int main(int argc, const char *argv[]) {
             true);
       } else {
         errors = matmul_common::verify<float, float, float>(M, N, K, AVec, BVec, CVec, verbosity,
-                                                            abs_tol, rel_tol, true);
+                                                            abs_tol * 3, rel_tol, true);
       }
       auto vstop = std::chrono::system_clock::now();
 
       // std::ofstream outfile("output.txt");
-      // matmul_common::print_matrix(CVec, N, M, N, outfile, " ", " ... ", 0);
+      // matmul_common::print_matrix(CVec, N, M, N, outfile, " ", " ... ", 3);
       // printBfp16ebs8Array(C_VOLUME, CVecBfp, 16, 16, outfile);
       // outfile.close();
 

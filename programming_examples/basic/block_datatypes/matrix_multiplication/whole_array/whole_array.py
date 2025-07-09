@@ -153,7 +153,8 @@ def my_matmul(M, K, N, m, k, n, n_aie_cols):
     # Input B
     for col in range(n_aie_cols):
         B_l3l2_fifos[col] = ObjectFifo(B_l2_ty, name=f"B_L3L2_{col}", depth=fifo_depth)
-        dims_to_stream = [(8, 8), (8, 64), (8, 1)]
+        dims_to_stream = None
+        # dims_to_stream = [(8, 8), (8, 64), (8, 1)]
         B_l2l1_fifos[col] = (
             B_l3l2_fifos[col]
             .cons()

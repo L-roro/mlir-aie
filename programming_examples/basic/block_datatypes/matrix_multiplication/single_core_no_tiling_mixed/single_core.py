@@ -37,7 +37,7 @@ def my_matmul():
     b_ty = np.ndarray[(k * n // 8,), np.dtype[v8bfp16ebs8]]
     c_ty = np.ndarray[(m * n,), np.dtype[bfloat16]]
 
-    zero_kernel = Kernel(f"zero_kernel", f"mm_{m}x{k}x{n}.o", [c_ty])
+    zero_kernel = Kernel(f"zero_kernel_bf16", f"mm_{m}x{k}x{n}.o", [c_ty])
     matmul_kernel = Kernel(
         "matmul_vectorized_different_datatypes",
         f"mm_{m}x{k}x{n}.o",
@@ -49,7 +49,8 @@ def my_matmul():
     memA = inA.cons().forward(name="memA", dims_to_stream=a_dims)
 
     inB = ObjectFifo(b_ty, name="inB")
-    b_dims = [(8, 8), (8, 64), (8, 1)]
+    b_dims = None
+    # b_dims = [(8, 8), (8, 64), (8, 1)]
     memB = inB.cons().forward(name="memB", dims_to_stream=b_dims)
 
     memC = ObjectFifo(c_ty, name="memC")
