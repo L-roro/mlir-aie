@@ -20,6 +20,14 @@
 #include <random>
 #include <vector>
 
+inline std::string toBinaryString(int8_t n) {
+  std::bitset<8> bits(static_cast<uint8_t>(n));
+  std::string binary_str = bits.to_string();
+  binary_str.insert(4, " ");
+
+  return binary_str;
+}
+
 // Helper function to generate random floating point numbers with high exponent
 // variance (useful for blocked datatypes). Exponents are interpreted as base 2
 inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp, double maxExp) {
@@ -42,22 +50,19 @@ inline float generateRandomFloatingPoint(std::mt19937 &eng, double minExp, doubl
 // The return array is structured as follows:
 // 1. The first byte is the shared exponent (max exponent of the block).
 // 2. The next *block* bytes are the quantized values.
-inline std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0,
-                                         int verbose = 0) {
+inline std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int rounding = 0) {
   std::vector<uint8_t> res(size * 1.125);
 
   int mbits = 7;
-  int start = 0, end, i, j, int8 = 1;
+  int start = 0, end, i, currentIndex = 1;
   unsigned int sign, exp, maxExp;
-  unsigned int *p, mantissa, mask, value;
-  int shift, maxShift;
-  int8_t valueInt8;
+  unsigned int *p, mantissa;
+  uint8_t valueInt8;
 
   while (true) {
     // decide on the block (starting and ending point)
     end = start + block;
-    if (end > size)
-      end = size;
+    end = end > size ? size : end;
 
     // Find max exp
     maxExp = 0;
@@ -66,19 +71,13 @@ inline std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int 
       exp = *p >> 23;    // Get rid of mantissa
       exp &= 0x000000FF; // Keep the last 8 bit exponent (remove sign)
 
-      if (maxExp < exp)
-        maxExp = exp;
+      maxExp = maxExp < exp ? exp : maxExp;
     }
 
     // Round each number
-    maxShift = 0;
     for (i = start; i < end; i++) {
       p = (unsigned int *)(array + i);
-      if (verbose) {
-        printf("%d: value in float = %f\n", i, array[i]);
-      }
 
-      // sign, exp, and mantissa
       sign = *p & 0x80000000;     // Sign
       exp = *p >> 23;             // Get rid of mantissa
       exp &= 0x000000FF;          // Keep the last 8 bit exponent (remove sign)
@@ -89,91 +88,27 @@ inline std::vector<uint8_t> floatToBfp16(int block, int size, float *array, int 
       if (exp >= 255)
         continue; // Infinity or NaN remains
 
-      // Calculate shift (bits needs to be zeroed out)
+      // The rouding mode for the mantissa in AIE2p is always truncation
+      // Each scalar value is stored in two's complement representation
+      mantissa = sign ? ~mantissa + 1 : mantissa;
       // At least erase 23 - mbits + 1 (+1 is for making the implicit bit
-      // explicit) or more if smaller
-      shift = 23 - mbits + 1 + maxExp - exp;
-      if (verbose) {
-        printf("%d: shift=%d rounding=%d\n", i, shift, rounding);
-        printf("%d: AS READ         sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
-      }
+      // explicit)
+      valueInt8 = mantissa >> (23 - mbits + 1);
 
-      // Calculate rounding
-      switch (rounding) {
-      case 0:
-        break; // do nothing, just truncate
-      case 1:
-        mantissa += 1 << (shift - 1); // add rounding for nearest
-        mask = 1;
-        for (j = 0; j <= shift; j++) {
-          if (mantissa & mask) {
-            if (j < shift)
-              break; // some bit is set, not a tie case
-            if (j == shift)
-              mantissa &= ~mask; // tie case, rounded to odd bits, adjust to even
-          }
-          mask <<= 1;
-        }
-        break;
-      default:
-        break;
-      }
-      if (verbose) {
-        printf("%d: ADDED ROUNDING  sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
-      }
-      if (mantissa & 0x01000000) { // rounding carried forward and need to adjust exponent
-        if (exp < maxExp) {        // This will not result in shifting of max_exp
-          mantissa >>= 1;
-          exp += 1;
-          shift -= 1;
-          if (exp >= 255)
-            mantissa = 0;         // overflow, signals infinity, should not happen
-        } else {                  // Keep the current scale and round down
-          mantissa -= 1 << shift; // Round down instead
-        }
-      }
-      if (verbose) {
-        printf("%d: ADJUST CARRY    sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
-      }
-
-      // Perform shift
-      if (shift < 32) {
-        mantissa >>= shift; // setting bits to zero
-        mantissa <<= shift;
+      // Note that shifting by more than 32 bits is undefined behavior in C++
+      if (maxExp - exp >= 32) {
+        valueInt8 = sign ? 0xff : 0x00;
       } else {
-        mantissa = 0;
+        // Perform an arithmetic right shift
+        // Again, the rounding mode is truncation for AIE2p
+        valueInt8 = static_cast<int8_t>(valueInt8) >> (maxExp - exp);
       }
 
-      if (verbose) {
-        printf("%d: SHIFTED         sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
-      }
-      if (mantissa) {
-        if (shift < 32)
-          valueInt8 = (sign >> 24) | (mantissa >> (17 + maxExp - exp));
-        else
-          valueInt8 = (sign >> 24);
-        if (exp)
-          mantissa &= ~0x00800000; // remove implicit bit for normal number
-        value = sign | (exp << 23) | mantissa;
-      } else {
-        valueInt8 = 0;
-        value = sign; // Mantissa is rounded to zero, signal zero
-      }
-      *p = value;
-      if (verbose) {
-        printf("%d: TO BE WRITTEN   sign=%d exp=%d mantissa=0x%08x\n", i, sign, exp, mantissa);
-        printf("%d: value = %f\n", i, *(array + i));
-        printf("%d: value_int8 = 0x%08x\n", int8, valueInt8);
-        printf("max_exp = %d\n", maxExp);
-      }
-      res[int8] = valueInt8;
-      int8++;
-
-      if (maxShift < shift)
-        maxShift = shift;
+      res[currentIndex] = valueInt8;
+      currentIndex++;
     }
-    res[int8 - 9] = (uint8_t)maxExp;
-    int8++;
+    res[currentIndex - 9] = (uint8_t)maxExp;
+    currentIndex++;
     start = end;
     if (start >= size)
       break;
@@ -204,7 +139,13 @@ inline std::vector<float> bfp16ebs8ToFloat(int size, uint8_t *array, int verbose
     }
     for (int j = 1; j < block + 1; j++) {
       bool negative = array[i + j] & 0x80;
-      res[tempIndx] = float((array[i + j] & 0x7F) * multiplier);
+      if (negative) {
+        // Two's complement for negative numbers
+        uint8_t decoded = ~(array[i + j] - 1);
+        res[tempIndx] = float(decoded) * multiplier;
+      } else {
+        res[tempIndx] = float(array[i + j] * multiplier);
+      }
       res[tempIndx] = negative ? -res[tempIndx] : res[tempIndx];
       if (verbose) {
         printf("return_array[%d] = %f\n", tempIndx, res[tempIndx]);
@@ -279,14 +220,6 @@ inline std::vector<uint8_t> shuffleMatrixForBfp16ebs8(size_t matrixWidth, size_t
   }
 
   return res;
-}
-
-inline std::string toBinaryString(int8_t n) {
-    std::bitset<8> bits(static_cast<uint8_t>(n));
-    std::string binary_str = bits.to_string();
-    binary_str.insert(4, " ");
-    
-    return binary_str;
 }
 
 // Pretty print to ostream a bfp16ebs8 array

@@ -12,6 +12,7 @@
 #include <boost/program_options.hpp>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <random>
 #include <string>
@@ -135,9 +136,15 @@ int main(int argc, const char *argv[]) {
   //   return generateRandomFloatingPoint(rng, -5, 5);
   // });
   for (int i = 0; i < numberFloats; i++) {
-    floatA[i] = -i;
+    floatA[i] = rand() % 1000;
+    // floatA[i] = rand() % 1000;
     // floatA[i] = i;
   }
+
+  // floatA[2] = -0.0625f;
+  // floatA[3] = -1.125f;
+  // floatA[4] = 10000;
+
   for (int i = 0; i < numberFloats; i++) {
     floatB[i] = i % 9 == 0 ? 1 : 0;
     // floatB[i] = 0;
@@ -195,10 +202,26 @@ int main(int argc, const char *argv[]) {
   matmul_common::matmul<float, float, float>(matrixSize, matrixSize, matrixSize, floatAVec,
                                              floatBVec, expectedResultVec, false);
 
+  auto test = floatToBfp16(8, numberFloats, floatA, 0);
+  printf("CPU conversion of input A:\n");
+  printBfp16ebs8Array(numberFloats * 1.125, test, 1, 64);
+
+  printf("NPU conversion of input A:\n");
   printBfp16ebs8Array(numberFloats * 1.125, std::vector(bufOut, bufOut + bfpBytesSize), 1, 64);
   auto outputTransformed = bfp16ebs8ToFloat(bfpBytesSize, bufOut, 0);
 
   int errors = 0;
+
+  for (int i = 0; i < numberFloats * 1.125; i++) {
+    if (test[i] != bufOut[i]) {
+      std::cout << "Error in output " << i << ": " << (int)test[i] << " != " << (int)bufOut[i]
+                << std::endl;
+      errors++;
+    } else {
+      if (verbosity > 1)
+        std::cout << "Correct output " << (int)test[i] << " == " << (int)bufOut[i] << std::endl;
+    }
+  }
 
   for (uint32_t i = 0; i < numberFloats; i++) {
     if (i % 8 == 0) {
