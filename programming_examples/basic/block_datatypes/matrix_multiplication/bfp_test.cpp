@@ -156,7 +156,7 @@ int main(int argc, const char *argv[]) {
   std::vector<float> AVec(A_SIZE);
   for (int i = 0; i < A_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    AVec[i] = (float)((rand() % 8) - 4);
+    AVec[i] = (float)((rand() % 1000));
 
     // if (i % K == i / K) {
     //   AVec[i] = 1.0;
@@ -170,7 +170,7 @@ int main(int argc, const char *argv[]) {
   std::vector<float> BVec(B_SIZE);
   for (int i = 0; i < B_SIZE; i++) {
     // Limiting to 16 to avoid precision loss issues
-    BVec[i] = (float)((rand() % 8) - 4);
+    BVec[i] = (float)((rand() % 10));
     // Diagonal:
     // if (i % K == i / K) {
     //   BVec[i] = 1.0;

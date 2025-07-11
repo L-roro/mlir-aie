@@ -41,41 +41,26 @@ void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16
 
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB1bfp16(pB);
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB2bfp16(pB);
-
       // For non transposed matrix
       // pB1bfp16.seek(j);
       // pB2bfp16.seek(j + 1);
       pB1bfp16.seek(j * colA);
       pB2bfp16.seek((j + 1) * colA);
 
-      aie::vector<bfloat16, sizeA> A0 = aie::load_v<sizeA>(pA1);
-      pA1 += sizeA;
-      aie::vector<bfloat16, sizeA> A1 = aie::load_v<sizeA>(pA2);
-      pA2 += sizeA;
-
-      // For non transposed matrix
-      // aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
-      // aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
-      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop();
-      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop();
+      aie::vector<bfloat16, sizeA> A0;
+      aie::vector<bfloat16, sizeA> A1;
+      aie::block_vector<bfp16ebs8, sizeB> B0;
+      aie::block_vector<bfp16ebs8, sizeB> B1;
 
       aie::accum<accfloat, sizeC> accC00(aie::load_v<sizeC>(pC1));
       aie::accum<accfloat, sizeC> accC01(aie::load_v<sizeC>(pC1 + sizeC));
       aie::accum<accfloat, sizeC> accC10(aie::load_v<sizeC>(pC2));
       aie::accum<accfloat, sizeC> accC11(aie::load_v<sizeC>(pC2 + sizeC));
 
-      // Convert A0 into bfp16
-      aie::accum<accfloat, 64> accA0(A0);
-      // Convert A1 into bfp16 through a different VLIW slot (see bfp conversion example)
-      aie::accum<accfloat, 64> accA1 =
-          mul_elem_64(A1, concat(broadcast_one_to_v32bfloat16(), broadcast_one_to_v32bfloat16()));
+      aie::accum<accfloat, 64> accA0;
+      aie::accum<accfloat, 64> accA1;
 
-      accC00 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B0, accC00);
-      accC01 = mac_8x8_8x8T(accA0.to_vector<bfp16ebs8>(), B1, accC01);
-      accC10 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B0, accC10);
-      accC11 = mac_8x8_8x8T(accA1.to_vector<bfp16ebs8>(), B1, accC11);
-
-      for (unsigned i = 1; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(3,) {
+      for (unsigned i = 0; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(4,) {
         A0 = aie::load_v<sizeA>(pA1);
         pA1 += sizeA;
         A1 = aie::load_v<sizeA>(pA2);
@@ -83,7 +68,7 @@ void matmul_vectorized_2x2_bfp16_bf16(const bfloat16 *__restrict pA, const bfp16
 
         // Convert A0 into bfp16
         accA0 = A0;
-        // Convert A1 into bfp16 through a different VLIW slot (see bfp conversion example)
+        // Convert A1 into bfp16 through a different path (see bfp conversion example)
         accA1 =
             mul_elem_64(A1, concat(broadcast_one_to_v32bfloat16(), broadcast_one_to_v32bfloat16()));
 

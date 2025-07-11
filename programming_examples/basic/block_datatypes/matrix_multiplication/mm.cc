@@ -85,43 +85,32 @@ void matmul_vectorized_2x2_bfp16(const bfp16ebs8 *__restrict pA, const bfp16ebs8
 
     for (unsigned j = 0; j < colB; j += 2) chess_loop_range(2,) {
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pA1bfp16(pA);
-      pA1bfp16.seek(z * colA);
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pA2bfp16(pA);
+      pA1bfp16.seek(z * colA);
       pA2bfp16.seek((z + 1) * colA);
 
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB1bfp16(pB);
       aie::block_vector_input_buffer_stream<bfp16ebs8, 64> pB2bfp16(pB);
-      
       // For non transposed matrix
       // pB1bfp16.seek(j);
       // pB2bfp16.seek(j + 1);
       pB1bfp16.seek(j * colA);
       pB2bfp16.seek((j + 1) * colA);
 
-      aie::block_vector<bfp16ebs8, sizeA> A0 = pA1bfp16.pop();
-      aie::block_vector<bfp16ebs8, sizeA> A1 = pA2bfp16.pop();
-
-      // For non transposed matrix
-      // aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop_seek(colB - 1);
-      // aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop_seek(colB - 1);
-      aie::block_vector<bfp16ebs8, sizeB> B0 = pB1bfp16.pop();
-      aie::block_vector<bfp16ebs8, sizeB> B1 = pB2bfp16.pop();
+      aie::block_vector<bfp16ebs8, sizeA> A0;
+      aie::block_vector<bfp16ebs8, sizeA> A1;
+      aie::block_vector<bfp16ebs8, sizeB> B0;
+      aie::block_vector<bfp16ebs8, sizeB> B1;
 
       // Note that unlike the example mentioned above, we need
       // to use a mac to take into account results from previous kernel calls
       // but this is completely unrelated to the block datatype.
       aie::accum<accfloat, sizeC> accC00(pC1In.pop());
       aie::accum<accfloat, sizeC> accC01(pC1In.pop());
-
       aie::accum<accfloat, sizeC> accC10(pC2In.pop());
       aie::accum<accfloat, sizeC> accC11(pC2In.pop());
 
-      accC00 = mac_8x8_8x8T(A0, B0, accC00);
-      accC01 = mac_8x8_8x8T(A0, B1, accC01);
-      accC10 = mac_8x8_8x8T(A1, B0, accC10);
-      accC11 = mac_8x8_8x8T(A1, B1, accC11);
-
-      for (unsigned i = 1; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(3,) {
+      for (unsigned i = 0; i < colA; ++i) chess_prepare_for_pipelining chess_loop_range(4,) {
         A0 = pA1bfp16.pop();
         A1 = pA2bfp16.pop();
 
